@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.yaostreaming.api.live.rtmp.RtmpGoLiveResponse;
 import com.yaostreaming.api.security.SecurityConfig;
 import com.yaostreaming.api.storage.CloudFrontProperties;
 import com.yaostreaming.api.user.CurrentUserProvider;
@@ -41,7 +42,7 @@ class LiveStreamControllerTest {
 	private CloudFrontProperties cloudFrontProperties;
 
 	private static final String VALID_BODY = """
-			{"title":"My Broadcast","description":"Playing games"}
+			{"title":"My Broadcast","description":"Playing games","mode":"RTMP"}
 			""";
 
 	@Test
@@ -49,7 +50,7 @@ class LiveStreamControllerTest {
 		User user = new User("dev@example.com", "Dev User", "hash");
 		when(currentUserProvider.require()).thenReturn(user);
 		when(liveStreamingService.goLive(eq(user), any()))
-				.thenReturn(new GoLiveResponse(7L, "rtmp://18.177.13.33:1935/pool-0", StreamStatus.STARTING));
+				.thenReturn(new RtmpGoLiveResponse(7L, "rtmp://18.177.13.33:1935/pool-0", StreamStatus.STARTING));
 
 		mockMvc.perform(post("/api/streams").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 						.content(VALID_BODY))

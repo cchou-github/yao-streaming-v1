@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.yaostreaming.api.live.IngestMode;
 import com.yaostreaming.api.live.LiveChannelPool;
 import com.yaostreaming.api.live.Stream;
 import com.yaostreaming.api.live.StreamRepository;
@@ -17,10 +18,13 @@ import com.yaostreaming.api.security.SecurityConfig;
 import com.yaostreaming.api.storage.CloudFrontProperties;
 import com.yaostreaming.api.user.User;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -36,8 +40,23 @@ import org.springframework.test.web.servlet.MockMvc;
  * {@code TranscodeCallbackControllerTest} exactly.
  */
 @WebMvcTest(LiveCallbackController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, LiveCallbackControllerTest.PoolMapConfig.class})
 class LiveCallbackControllerTest {
+
+	/**
+	 * {@code @WebMvcTest} slices don't load {@code LiveChannelPoolConfig}
+	 * (production config, not controller-layer) - this stands in for it,
+	 * wiring the one mocked {@link LiveChannelPool} into a real map so
+	 * {@link LiveCallbackController}'s constructor resolves the same way it
+	 * does in the real app.
+	 */
+	@TestConfiguration
+	static class PoolMapConfig {
+		@Bean
+		Map<IngestMode, LiveChannelPool> channelPoolsByMode(LiveChannelPool liveChannelPool) {
+			return Map.of(IngestMode.RTMP, liveChannelPool);
+		}
+	}
 
 	@Autowired
 	private MockMvc mockMvc;

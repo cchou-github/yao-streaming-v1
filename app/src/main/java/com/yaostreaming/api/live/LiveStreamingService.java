@@ -1,6 +1,9 @@
 package com.yaostreaming.api.live;
 
+import com.yaostreaming.api.live.rtmp.RtmpGoLiveResponse;
+import com.yaostreaming.api.live.webrtc.WebrtcGoLiveResponse;
 import com.yaostreaming.api.user.User;
+import java.util.Map;
 import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -15,18 +18,25 @@ import org.springframework.web.server.ResponseStatusException;
  * happen with no open transaction around them - same reasoning
  * {@code VideoStatusTransitions} documents for why status writes live in
  * their own bean rather than inline in a service method.
+ *
+ * <p>Routes through {@link LiveChannelPoolConfig}'s
+ * {@code Map<IngestMode, LiveChannelPool>} rather than a single injected
+ * field - the map exists specifically because two {@link LiveChannelPool}
+ * beans are active now ({@code rtmp.MediaLiveChannelPool},
+ * {@code webrtc.IvsChannelPool}), and this class needs to pick the right
+ * one per request rather than assuming there's only ever one.
  */
 @Service
 public class LiveStreamingService {
 
 	private final StreamRepository streamRepository;
-	private final LiveChannelPool liveChannelPool;
+	private final Map<IngestMode, LiveChannelPool> channelPoolsByMode;
 	private final StreamStatusTransitions statusTransitions;
 
-	public LiveStreamingService(StreamRepository streamRepository, LiveChannelPool liveChannelPool,
-			StreamStatusTransitions statusTransitions) {
+	public LiveStreamingService(StreamRepository streamRepository,
+			Map<IngestMode, LiveChannelPool> channelPoolsByMode, StreamStatusTransitions statusTransitions) {
 		this.streamRepository = streamRepository;
-		this.liveChannelPool = liveChannelPool;
+		this.channelPoolsByMode = channelPoolsByMode;
 		this.statusTransitions = statusTransitions;
 	}
 
@@ -54,17 +64,22 @@ public class LiveStreamingService {
 									+ ") - end it before starting another");
 				});
 
-		Stream stream = new Stream(user, request.title());
+		Stream stream = new Stream(user, request.title(), request.mode());
 		if (request.description() != null && !request.description().isBlank()) {
 			stream.setDescription(request.description());
 		}
 		streamRepository.save(stream);
 
-		LiveChannelPool.ReservedChannel reserved = liveChannelPool.reserve(stream.getId())
+		LiveChannelPool pool = channelPoolsByMode.get(request.mode());
+		LiveChannelPool.ReservedChannel reserved = pool.reserve(stream.getId())
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
 						"Every channel is currently in use - try again shortly"));
 
-		return new GoLiveResponse(stream.getId(), reserved.ingestUrl(), StreamStatus.STARTING);
+		return switch (request.mode()) {
+			case RTMP -> new RtmpGoLiveResponse(stream.getId(), reserved.ingestUrl(), StreamStatus.STARTING);
+			case WEBRTC -> new WebrtcGoLiveResponse(
+					stream.getId(), reserved.ingestUrl(), reserved.streamKey(), StreamStatus.STARTING);
+		};
 	}
 
 	/**
@@ -104,7 +119,7 @@ public class LiveStreamingService {
 		boolean ending = statusTransitions.markEndingRequested(streamId, StreamStatus.LIVE)
 				|| statusTransitions.markEndingRequested(streamId, StreamStatus.STARTING);
 		if (ending) {
-			liveChannelPool.release(streamId);
+			channelPoolsByMode.get(stream.getIngestMode()).release(streamId);
 		}
 	}
 

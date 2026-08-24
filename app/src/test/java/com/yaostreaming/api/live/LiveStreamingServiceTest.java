@@ -8,7 +8,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.yaostreaming.api.live.rtmp.RtmpGoLiveResponse;
 import com.yaostreaming.api.user.User;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,7 +46,8 @@ class LiveStreamingServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new LiveStreamingService(streamRepository, liveChannelPool, statusTransitions);
+		service = new LiveStreamingService(
+				streamRepository, Map.of(IngestMode.RTMP, liveChannelPool), statusTransitions);
 		doAnswer(invocation -> {
 			Stream stream = invocation.getArgument(0);
 			ReflectionTestUtils.setField(stream, "id", nextId.getAndIncrement());
@@ -57,16 +60,17 @@ class LiveStreamingServiceTest {
 		when(liveChannelPool.reserve(42L)).thenReturn(
 				Optional.of(LiveChannelPool.ReservedChannel.rtmp("channel-0", "pool-0", "rtmp://ingest-0")));
 
-		GoLiveResponse response = service.goLive(owner, new GoLiveRequest("My Broadcast", "Playing games"));
+		GoLiveResponse response = service.goLive(owner,
+				new GoLiveRequest("My Broadcast", "Playing games", IngestMode.RTMP));
 
-		assertThat(response).isEqualTo(new GoLiveResponse(42L, "rtmp://ingest-0", StreamStatus.STARTING));
+		assertThat(response).isEqualTo(new RtmpGoLiveResponse(42L, "rtmp://ingest-0", StreamStatus.STARTING));
 	}
 
 	@Test
 	void goLiveThrowsServiceUnavailableWhenThePoolIsExhausted() {
 		when(liveChannelPool.reserve(42L)).thenReturn(Optional.empty());
 
-		assertThatThrownBy(() -> service.goLive(owner, new GoLiveRequest("My Broadcast", null)))
+		assertThatThrownBy(() -> service.goLive(owner, new GoLiveRequest("My Broadcast", null, IngestMode.RTMP)))
 				.isInstanceOf(ResponseStatusException.class)
 				.hasMessageContaining("503");
 	}
@@ -79,7 +83,7 @@ class LiveStreamingServiceTest {
 		when(streamRepository.findFirstByUser_IdAndStatusInOrderByCreatedAtDesc(1L, StreamStatus.CHANNEL_BOUND))
 				.thenReturn(Optional.of(existing));
 
-		assertThatThrownBy(() -> service.goLive(owner, new GoLiveRequest("My Broadcast", null)))
+		assertThatThrownBy(() -> service.goLive(owner, new GoLiveRequest("My Broadcast", null, IngestMode.RTMP)))
 				.isInstanceOf(ResponseStatusException.class)
 				.hasMessageContaining("409");
 
@@ -92,7 +96,7 @@ class LiveStreamingServiceTest {
 		when(liveChannelPool.reserve(any())).thenReturn(
 				Optional.of(LiveChannelPool.ReservedChannel.rtmp("channel-0", "pool-0", "rtmp://ingest-0")));
 
-		service.goLive(owner, new GoLiveRequest("My Broadcast", "   "));
+		service.goLive(owner, new GoLiveRequest("My Broadcast", "   ", IngestMode.RTMP));
 
 		ArgumentCaptor<Stream> saved = ArgumentCaptor.forClass(Stream.class);
 		verify(streamRepository).save(saved.capture());

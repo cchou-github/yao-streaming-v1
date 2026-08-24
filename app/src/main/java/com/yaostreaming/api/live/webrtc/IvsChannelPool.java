@@ -8,6 +8,7 @@ import com.yaostreaming.api.live.StreamStatusTransitions;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.ivs.IvsClient;
 import software.amazon.awssdk.services.ivs.model.ChannelNotBroadcastingException;
 import software.amazon.awssdk.services.ivs.model.CreateStreamKeyRequest;
@@ -33,19 +34,16 @@ import software.amazon.awssdk.services.ivs.model.StopStreamRequest;
  * exactly one stream key per channel at a time and has no reset/rotate
  * action (confirmed against the real API action list).
  *
- * <p><b>Deliberately not a {@code @Component} yet.</b> Confirmed the hard
- * way (a full-context test failing with {@code NoUniqueBeanDefinitionException}):
- * the moment a second bean implements {@link LiveChannelPool},
- * {@code LiveStreamingService}'s existing single-field autowiring becomes
- * ambiguous - Spring has no way to pick between this and
- * {@code rtmp.MediaLiveChannelPool} on its own. Registering this as a bean
- * is a later PR's job, landing together with {@code LiveChannelPoolConfig}'s
- * {@code Map<IngestMode, LiveChannelPool>} (built from every bean
- * implementing this interface) and {@code LiveStreamingService}'s switch to
- * routing through that map instead of a single field - the two changes
- * have to land atomically, not this one alone. Fully unit-tested here in
- * the meantime.
+ * <p>Only became a {@code @Component} once {@link LiveChannelPoolConfig}'s
+ * {@code Map<IngestMode, LiveChannelPool>} and
+ * {@code LiveStreamingService}'s switch to routing through that map were
+ * ready - registering this as a bean any earlier, on its own, broke
+ * {@code LiveStreamingService}'s previous single-field autowiring the
+ * moment a second {@link LiveChannelPool} bean existed
+ * ({@code NoUniqueBeanDefinitionException}, confirmed live by a
+ * full-context test failure). The two changes had to land together.
  */
+@Component
 public class IvsChannelPool implements LiveChannelPool {
 
 	private final StreamRepository streamRepository;

@@ -1,11 +1,13 @@
 package com.yaostreaming.api.live.internal;
 
+import com.yaostreaming.api.live.IngestMode;
 import com.yaostreaming.api.live.LiveChannelPool;
 import com.yaostreaming.api.live.Stream;
 import com.yaostreaming.api.live.StreamRepository;
 import com.yaostreaming.api.live.StreamStatus;
 import com.yaostreaming.api.live.StreamStatusTransitions;
 import jakarta.validation.Valid;
+import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,13 +41,13 @@ public class LiveCallbackController {
 
 	private final StreamRepository streamRepository;
 	private final StreamStatusTransitions statusTransitions;
-	private final LiveChannelPool liveChannelPool;
+	private final Map<IngestMode, LiveChannelPool> channelPoolsByMode;
 
 	public LiveCallbackController(StreamRepository streamRepository, StreamStatusTransitions statusTransitions,
-			LiveChannelPool liveChannelPool) {
+			Map<IngestMode, LiveChannelPool> channelPoolsByMode) {
 		this.streamRepository = streamRepository;
 		this.statusTransitions = statusTransitions;
-		this.liveChannelPool = liveChannelPool;
+		this.channelPoolsByMode = channelPoolsByMode;
 	}
 
 	@PostMapping("/callback")
@@ -79,7 +81,7 @@ public class LiveCallbackController {
 		// either way, since ResetOriginEndpointState is idempotent, but
 		// there's no reason to make the redundant call).
 		if (applied && request.status() == LiveCallbackStatus.STOPPED) {
-			liveChannelPool.confirmStopped(streamId);
+			channelPoolsByMode.get(stream.orElseThrow().getIngestMode()).confirmStopped(streamId);
 		}
 
 		// EventBridge is at-least-once, so a redelivered callback is

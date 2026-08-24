@@ -1,9 +1,11 @@
 ---
 name: deploy
-description: Provision AWS infrastructure and deploy yao_streaming to it - Terraform apply, building the app image, and rolling out via Kubernetes. Use when asked to deploy, redeploy, push changes live, or stand the platform up on AWS.
+description: Provision AWS infrastructure and deploy yao_streaming to it - Terraform apply, building the app image and Lambda jar, and rolling out via Kubernetes. Use when asked to deploy, redeploy, push changes live, or stand the platform up on AWS.
 ---
 
 # Deploy to AWS
+
+Full detail lives in `docs/guide/deployment.md` and `docs/guide/infrastructure.md` — read those first if this is a fresh session. This skill is the quick sequence once you already know the shape.
 
 ## Order of operations
 
@@ -23,10 +25,10 @@ description: Provision AWS infrastructure and deploy yao_streaming to it - Terra
 ```
 kubectl get pods
 kubectl rollout status deployment/app --timeout=30s
-curl -sI "http://$(cd terraform && terraform output -raw alb_dns_name)/login"
+curl -sI "https://$(cd terraform && terraform output -raw cloudfront_domain_name)/login"
 ```
 
-A 200 on `/login` means the app is reachable.
+A 200 on `/login` means the app is reachable through CloudFront. For anything live-streaming-specific (go-live, playback), see the `verify-live-streaming` skill.
 
 ## Rebuilding from scratch
 

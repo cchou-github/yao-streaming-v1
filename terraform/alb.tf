@@ -95,7 +95,35 @@ resource "aws_lb_listener" "app_http" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
   }
+}
 
+# /internal/** (TranscodeCallbackController) is only meant to be reachable
+# via the internal ALB - SecurityConfig permits it with no session/CSRF
+# check at all, trusting the network path as the real gate (see
+# internal-alb.tf). But this public ALB and the internal one forward to
+# the app on the exact same NodePort/pods, so without this rule anyone on
+# the internet could hit /internal/** straight through this ALB too,
+# defeating that gate entirely. Evaluated before the default forward
+# action, so a matching request never reaches the target group at all.
+resource "aws_lb_listener_rule" "block_internal" {
+  listener_arn = aws_lb_listener.app_http.arn
+  priority     = 1
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Not Found"
+      status_code  = "404"
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/internal/*"]
+    }
+  }
 }
 
 # Keeps the target group's registered targets correct as the node group

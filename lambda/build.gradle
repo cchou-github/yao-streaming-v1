@@ -1,0 +1,73 @@
+plugins {
+	id 'java'
+	id 'com.gradleup.shadow' version '9.6.1'
+}
+
+group = 'com.yaostreaming'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	// Matches Lambda's managed runtime (runtime = "java21" in terraform/lambda.tf) -
+	// Lambda has no Java 25 runtime yet, unlike app/'s toolchain.
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+ext {
+	awsSdkVersion = '2.35.9'
+}
+
+// Same restriction app/build.gradle already works around: the JDK no longer
+// allows a library to self-attach as a Java agent at runtime, which
+// Mockito's inline mock maker depends on - has to be passed explicitly via
+// -javaagent instead.
+configurations {
+	mockitoAgent {
+		transitive = false
+	}
+}
+
+dependencies {
+	mockitoAgent 'org.mockito:mockito-core:5.15.2'
+
+	implementation 'com.amazonaws:aws-lambda-java-core:1.2.3'
+	implementation 'com.amazonaws:aws-lambda-java-events:3.13.0'
+
+	implementation platform("software.amazon.awssdk:bom:${awsSdkVersion}")
+	implementation 'software.amazon.awssdk:s3'
+	implementation 'software.amazon.awssdk:mediaconvert'
+
+	// CompleteTranscodeHandler parses the raw EventBridge event (no typed
+	// class for a MediaConvert "Job State Change" detail in
+	// aws-lambda-java-events) and serializes the callback payload - needs
+	// Jackson directly rather than relying on aws-lambda-java-events'
+	// transitive version.
+	implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
+
+	testImplementation platform('org.junit:junit-bom:5.11.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testImplementation 'org.mockito:mockito-core:5.15.2'
+	testImplementation 'org.mockito:mockito-junit-jupiter:5.15.2'
+	testImplementation 'org.assertj:assertj-core:3.27.2'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+	doFirst {
+		jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
+	}
+}
+
+// Terraform points aws_lambda_function.filename straight at this jar - see
+// terraform/lambda.tf. No archive_file/packaging step on the Terraform side,
+// same "you build it, Terraform just deploys the artifact" split already
+// used for the app's Docker image (built/pushed by deploy.sh, not Terraform).
+tasks.named('shadowJar') {
+	archiveClassifier.set('')
+}

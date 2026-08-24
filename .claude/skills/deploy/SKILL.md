@@ -8,7 +8,11 @@ description: Provision AWS infrastructure and deploy yao_streaming to it - Terra
 ## Order of operations
 
 1. **`terraform apply` is a real-money, manual, user-run action.** Never run `terraform plan`/`apply`/`destroy` without the user explicitly asking for that specific step in that moment — writing or editing `.tf` files does not imply permission to apply them. Always run `terraform plan` first and have the user review it before `apply`.
-2. Once infrastructure is up to date (`terraform apply` has been run by the user), deploy the application:
+2. If any Lambda source under `lambda/` changed since the last deploy, rebuild the jar Terraform reads from:
+   ```
+   cd lambda && ./gradlew shadowJar
+   ```
+3. Once infrastructure is up to date (`terraform apply` has been run by the user), deploy the application:
    ```
    k8s/aws/deploy.sh
    ```

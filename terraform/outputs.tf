@@ -87,3 +87,8 @@ output "alb_dns_name" {
   description = "The app's real public URL: http://<this>"
   value       = aws_lb.app.dns_name
 }
+
+output "alb_internal_dns_name" {
+  description = "Internal only - not reachable from outside the VPC. Wired into the completion Lambda's CALLBACK_URL env var."
+  value       = aws_lb.app_internal.dns_name
+}

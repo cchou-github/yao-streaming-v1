@@ -248,13 +248,25 @@ resource "aws_lambda_function" "live_state_change" {
   depends_on = [aws_iam_role_policy_attachment.lambda_complete_vpc]
 }
 
-# detail.state filtered to RUNNING/IDLE only, not every ChannelState value -
-# same "only the outcomes we act on" discipline as
-# mediaconvert_job_state_change's COMPLETE/ERROR filter above. Verified
-# against MediaLive's real ChannelState enum (see LiveStateChangeHandler's
-# own javadoc): there is no STOPPED or FAILED value on this event type at
-# all - a stopped channel reports IDLE, and channel-level failure would be
-# a separate "MediaLive Channel Alert" event, out of scope here.
+# detail.state filtered to RUNNING/STOPPED only, not every ChannelState
+# value - same "only the outcomes we act on" discipline as
+# mediaconvert_job_state_change's COMPLETE/ERROR filter above.
+#
+# STOPPED, not IDLE: this rule originally filtered on IDLE, based on
+# DescribeChannel's own ChannelState enum (which genuinely has no STOPPED
+# value - confirmed against the real SDK model). That was the wrong event
+# to check, though - this event's detail.state is a plain, unconstrained
+# string with its own separate vocabulary, not tied to ChannelState at
+# all. Proven live with a temporary catch-all rule logging every real
+# transition to CloudWatch Logs: MediaLive actually emits state=RUNNING,
+# then state=STOPPING, then state=STOPPED for a normal stop - it never
+# emits "IDLE" on this event type, despite DescribeChannel reporting
+# IDLE for the exact same channel at the exact same moment. The original
+# IDLE filter silently dropped every stop-completion event before it
+# ever reached the Lambda - confirmed by CloudWatch metrics showing zero
+# rule invocations across dozens of real channel stops this project has
+# done, while RUNNING delivered every single time. Channel-level failure
+# would be a separate "MediaLive Channel Alert" event, out of scope here.
 resource "aws_cloudwatch_event_rule" "medialive_channel_state_change" {
   name = "${var.project_name}-medialive-channel-state-change"
 
@@ -262,7 +274,7 @@ resource "aws_cloudwatch_event_rule" "medialive_channel_state_change" {
     source      = ["aws.medialive"]
     detail-type = ["MediaLive Channel State Change"]
     detail = {
-      state = ["RUNNING", "IDLE"]
+      state = ["RUNNING", "STOPPED"]
     }
   })
 }

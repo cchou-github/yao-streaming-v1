@@ -77,9 +77,15 @@ class LiveStateChangeHandlerTest {
 		assertThat(body.get("status").asText()).isEqualTo("RUNNING");
 	}
 
+	/**
+	 * STOPPED, not IDLE - confirmed live (temporary catch-all EventBridge
+	 * rule logging real transitions) that this is the actual value MediaLive
+	 * emits on this event type for a normal stop. IDLE is DescribeChannel's
+	 * own, unrelated ChannelState value.
+	 */
 	@Test
-	void postsAStoppedCallbackForAnIdleChannel() throws Exception {
-		handler.handleRequest(channelStateEvent("IDLE", "arn:aws:medialive:us-east-1:1:channel:2"), context);
+	void postsAStoppedCallbackForAStoppedChannel() throws Exception {
+		handler.handleRequest(channelStateEvent("STOPPED", "arn:aws:medialive:us-east-1:1:channel:2"), context);
 
 		assertThat(receivedBodies).hasSize(1);
 		JsonNode body = objectMapper.readTree(receivedBodies.get(0));

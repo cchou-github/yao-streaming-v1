@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * Triggered by an EventBridge rule matching MediaLive's "Channel State
  * Change" events (source {@code aws.medialive}, {@code detail.state} in
- * {@code RUNNING}/{@code IDLE} - see {@code terraform/lambda.tf}). Same
+ * {@code RUNNING}/{@code STOPPED} - see {@code terraform/lambda.tf}). Same
  * no-typed-event-class situation {@link CompleteTranscodeHandler} documents,
  * for the same reason: the {@code detail} schema is service-specific.
  *
@@ -22,14 +22,19 @@ import java.util.Map;
  * carries {@code detail.channel_arn}, so there's no {@code userMetadata}
  * convention to invent the way the video id needed one.
  *
- * <p>MediaLive's actual {@code ChannelState} enum (verified against the
- * real API model, not guessed) is {@code CREATING, CREATE_FAILED, IDLE,
- * STARTING, RUNNING, RECOVERING, STOPPING, DELETING, DELETED, UPDATING,
- * UPDATE_FAILED} - there
- * is no {@code STOPPED} or {@code FAILED} value on this event type at all. A
- * stopped channel reports {@code IDLE}; the EventBridge rule only forwards
- * {@code RUNNING}/{@code IDLE} in the first place, so those are the only two
- * values this handler ever actually sees.
+ * <p>An earlier version of this javadoc claimed a stopped channel reports
+ * {@code IDLE} here, reasoning from {@code DescribeChannel}'s {@code
+ * ChannelState} enum (which genuinely has no {@code STOPPED} value).
+ * That conflated two unrelated vocabularies: this event's {@code
+ * detail.state} is a plain, unconstrained string with its own values, not
+ * tied to {@code ChannelState} at all. Proven live with a temporary
+ * catch-all EventBridge rule logging every real transition: MediaLive
+ * actually emits {@code RUNNING}, then {@code STOPPING}, then {@code
+ * STOPPED} for a normal stop - never {@code IDLE} on this event type,
+ * despite {@code DescribeChannel} reporting {@code IDLE} for the exact
+ * same channel at the exact same moment. The original {@code IDLE} filter
+ * silently dropped every stop-completion event before it ever reached
+ * this handler.
  */
 public class LiveStateChangeHandler implements RequestHandler<Map<String, Object>, Void> {
 

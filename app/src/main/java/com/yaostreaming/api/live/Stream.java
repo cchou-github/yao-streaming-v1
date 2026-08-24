@@ -36,11 +36,27 @@ public class Stream {
 	@Column(nullable = false, length = 20)
 	private StreamStatus status;
 
+	@Enumerated(EnumType.STRING)
+	@Column(name = "ingest_mode", nullable = false, length = 20)
+	private IngestMode ingestMode;
+
 	@Column(name = "channel_id", length = 255)
 	private String channelId;
 
 	@Column(name = "origin_slug", length = 50)
 	private String originSlug;
+
+	/**
+	 * The IVS stream key's own ARN - {@code null} for RTMP streams. Needed
+	 * only so {@code IvsChannelPool.confirmStopped} knows which key to
+	 * {@code DeleteStreamKey} once the async stop confirmation lands
+	 * (rotation is delete-then-create, not a single reset call - IVS has no
+	 * API for that). Not nulled once set - same "leave it for audit
+	 * history" reasoning {@code channel_id}'s own migration comment
+	 * documents for itself.
+	 */
+	@Column(name = "ingest_secret_arn", length = 255)
+	private String ingestSecretArn;
 
 	@Column(name = "started_at")
 	private Instant startedAt;
@@ -57,10 +73,21 @@ public class Stream {
 	protected Stream() {
 	}
 
+	/**
+	 * Defaults to {@link IngestMode#RTMP}, for callers/tests that don't care
+	 * which mechanism a stream uses. {@link #Stream(User, String, IngestMode)}
+	 * is the explicit form the dual-mode {@code goLive} calls in production,
+	 * where the mechanism is a real, caller-supplied choice.
+	 */
 	public Stream(User user, String title) {
+		this(user, title, IngestMode.RTMP);
+	}
+
+	public Stream(User user, String title, IngestMode ingestMode) {
 		this.user = user;
 		this.title = title;
 		this.status = StreamStatus.PENDING;
+		this.ingestMode = ingestMode;
 	}
 
 	public Long getId() {
@@ -93,6 +120,19 @@ public class Stream {
 
 	public void setStatus(StreamStatus status) {
 		this.status = status;
+	}
+
+	/** Fixed at creation, never changes over a stream's lifecycle - getter only, deliberately no setter. */
+	public IngestMode getIngestMode() {
+		return ingestMode;
+	}
+
+	public String getIngestSecretArn() {
+		return ingestSecretArn;
+	}
+
+	public void setIngestSecretArn(String ingestSecretArn) {
+		this.ingestSecretArn = ingestSecretArn;
 	}
 
 	public String getChannelId() {

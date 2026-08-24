@@ -132,24 +132,30 @@ resource "aws_iam_role_policy_attachment" "app_irsa_mediapackage" {
 # Two statements with genuinely different resource types, not one combined
 # statement - confirmed against AWS's IAM action-to-resource-type mapping
 # (the Service Authorization Reference's own data, since the live page
-# itself is a JS app with no static content to fetch): CreateStreamKey and
-# DeleteStreamKey both require a *stream-key* ARN
+# itself is a JS app with no static content to fetch): CreateStreamKey,
+# DeleteStreamKey, and ListStreamKeys all require a *stream-key* ARN
 # (arn:...:ivs:...:stream-key/id), not the channel ARN, even though
-# channelArn is CreateStreamKey's own request parameter - StopStream is the
-# one that requires a *channel* ARN.
+# channelArn is each of their own request parameters - StopStream is the
+# one that requires a *channel* ARN. ListStreamKeys was added after
+# IvsChannelPool.reserve() needed it live: a freshly aws_ivs_channel'd
+# channel comes back from `terraform apply` with a default stream key IVS
+# auto-provisions on creation, so reserve() has to list (and delete)
+# whatever key already exists before creating its own - confirmed this is
+# stream-key-scoped, not channel-scoped, by the real 403's own resource ARN
+# in its error text, not assumed from the other two actions' shape.
 #
-# CreateStreamKey/DeleteStreamKey can only be wildcarded to stream-key/* in
-# this account/region, not narrowed to the pool's specific channels the way
-# app_medialive_control's UpdateInput statement narrows to specific input
-# ARNs - a stream key's own ARN is assigned by AWS at creation time and
-# carries no reference back to its parent channel, so Terraform has no
-# per-channel stream-key ARN to scope to in advance. Accepted gap, not
-# missed: StopStream (the action that actually terminates a session) is
-# scoped precisely.
+# CreateStreamKey/DeleteStreamKey/ListStreamKeys can only be wildcarded to
+# stream-key/* in this account/region, not narrowed to the pool's specific
+# channels the way app_medialive_control's UpdateInput statement narrows to
+# specific input ARNs - a stream key's own ARN is assigned by AWS at
+# creation time and carries no reference back to its parent channel, so
+# Terraform has no per-channel stream-key ARN to scope to in advance.
+# Accepted gap, not missed: StopStream (the action that actually terminates
+# a session) is scoped precisely.
 data "aws_iam_policy_document" "app_ivs_control" {
   statement {
     sid       = "RotatePoolStreamKeys"
-    actions   = ["ivs:CreateStreamKey", "ivs:DeleteStreamKey"]
+    actions   = ["ivs:CreateStreamKey", "ivs:DeleteStreamKey", "ivs:ListStreamKeys"]
     resources = ["arn:aws:ivs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:stream-key/*"]
   }
 

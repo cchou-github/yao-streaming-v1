@@ -14,6 +14,7 @@ import software.amazon.awssdk.services.ivs.model.ChannelNotBroadcastingException
 import software.amazon.awssdk.services.ivs.model.CreateStreamKeyRequest;
 import software.amazon.awssdk.services.ivs.model.CreateStreamKeyResponse;
 import software.amazon.awssdk.services.ivs.model.DeleteStreamKeyRequest;
+import software.amazon.awssdk.services.ivs.model.ListStreamKeysRequest;
 import software.amazon.awssdk.services.ivs.model.StopStreamRequest;
 
 /**
@@ -102,6 +103,7 @@ public class IvsChannelPool implements LiveChannelPool {
 
 			if (claimed) {
 				try {
+					deleteExistingStreamKeys(channelArn);
 					CreateStreamKeyResponse response = ivsClient.createStreamKey(
 							CreateStreamKeyRequest.builder().channelArn(channelArn).build());
 					statusTransitions.recordIngestSecretArn(streamId, response.streamKey().arn());
@@ -121,6 +123,27 @@ public class IvsChannelPool implements LiveChannelPool {
 		// Every candidate was already held by another active stream - an
 		// expected, at-capacity outcome, not an exceptional one.
 		return Optional.empty();
+	}
+
+	/**
+	 * Deletes whatever stream key(s) currently exist on this channel before
+	 * creating a new one - found live, not anticipated: {@code aws_ivs_channel}
+	 * comes back from {@code terraform apply} with a default stream key IVS
+	 * auto-provisions on channel creation, one the app never tracked or
+	 * requested. {@link #confirmStopped} only ever deletes the key *it*
+	 * created, so that AWS-provisioned default key survived untouched -
+	 * {@code CreateStreamKey} 402s with {@code ServiceQuotaExceededException}
+	 * ("stream-key quota exceeded limit: 1") the first time any pool channel
+	 * is ever claimed. Listing and deleting defensively here (rather than only
+	 * reacting to that specific exception) is self-healing against this same
+	 * class of drift generally - IVS enforces at most one key per channel, so
+	 * there is never more than one to clean up, and the extra list/delete
+	 * calls are free control-plane operations.
+	 */
+	private void deleteExistingStreamKeys(String channelArn) {
+		ivsClient.listStreamKeys(ListStreamKeysRequest.builder().channelArn(channelArn).build())
+				.streamKeys()
+				.forEach(key -> ivsClient.deleteStreamKey(DeleteStreamKeyRequest.builder().arn(key.arn()).build()));
 	}
 
 	/**

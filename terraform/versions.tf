@@ -14,6 +14,15 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    # null_resource for ivs.tf's playback-restriction-policy attachment -
+    # the one thing in this whole directory managed imperatively rather
+    # than declaratively, because neither aws_ivs_channel nor
+    # awscc_ivs_channel expose a field for it at all (see ivs.tf's own
+    # comment for why).
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
+    }
     # MediaPackage v2's resource hierarchy (ChannelGroup/Channel/
     # OriginEndpoint) is only natively available here, not in hashicorp/aws
     # - auto-generated from AWS's Cloud Control API schema. Mixing awscc

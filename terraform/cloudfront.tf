@@ -1,6 +1,18 @@
 # CloudFront + Origin Access Control in front of the processed bucket, with
 # the whole app proxied through the same distribution.
 #
+# A note on reading `terraform plan` output against this resource: both
+# `origin` and `ordered_cache_behavior` are modeled as ordered *lists* in
+# this provider's schema, not sets. Inserting a new block anywhere but the
+# end shows up as a cascade of "-"/"+" on every block after the insertion
+# point, even though their actual field values never change - only their
+# list position does. Confirmed by reading the plan output closely, not
+# assumed: adding the IVS origin/behavior below produced exactly this
+# pattern on app-alb/live-mediapackage/*.m3u8/*.ts, all with byte-identical
+# fields before and after. UpdateDistribution is one atomic API call
+# regardless of how the plan renders the diff, so this is cosmetic, not a
+# real destroy-and-recreate.
+#
 # Why CloudFront exists at all: the processed bucket is fully private (see
 # s3.tf) and presigned S3 GET URLs turned out not to cover HLS playback
 # correctly - MediaConvert's HLS_GROUP_SETTINGS always emits a two-level
@@ -129,6 +141,75 @@ resource "aws_cloudfront_function" "live_manifest_rewrite" {
   JS
 }
 
+# --- Live playback (browser/WebRTC): routes live-webrtc/pool-{N}/... to IVS ---
+#
+# Genuinely different shape from the MediaPackage case above, confirmed live
+# by actually publishing a real test stream and inspecting the resulting
+# manifest (not assumed from the MediaPackage precedent): all 5 IVS channels
+# in this account DO share one playback hostname (same "one shared origin"
+# simplification applies), but a channel's master/multivariant manifest path
+# embeds an AWS-assigned random channel id
+# (/api/video/v1/{region}.{account}.channel.{random-id}.m3u8) - not the
+# fully deterministic, Terraform-chosen-name path MediaPackage v2 has. The
+# rewrite function below needs a real lookup table (pool-N -> that channel's
+# actual path), not pure string concatenation.
+#
+# More importantly: the master manifest's own variant playlists are
+# referenced by *absolute URLs on a completely different IVS domain*
+# (apn14.playlist.live-video.net in testing, not a path under the master's
+# own host), and segments live on a third domain again - confirmed live,
+# not assumed. This means CloudFront (and this rewrite function) can only
+# ever cover the *first* request for a given playback session - every
+# subsequent request bypasses this distribution entirely and goes straight
+# to IVS's own edge. That's exactly why ivs.tf's playback_restriction_policy
+# (origin-checked at IVS's own edge, independent of CloudFront) exists -
+# CloudFront's signed cookies structurally cannot reach those later
+# requests, so something else has to gate them.
+locals {
+  # Any pool slot's playback_url works here - confirmed live that all 5
+  # channels in this account share one playback hostname, so index 0 is as
+  # good as any other.
+  ivs_playback_host = split("/", aws_ivs_channel.pool[0].playback_url)[2]
+
+  # Per-slot real manifest path, keyed by the same pool-N slug the app
+  # already uses for origin_slug elsewhere - jsonencode below turns this
+  # straight into a valid JS object literal for the CloudFront Function.
+  ivs_playback_paths = {
+    for i, c in aws_ivs_channel.pool :
+    "pool-${i}" => replace(c.playback_url, "https://${local.ivs_playback_host}", "")
+  }
+}
+
+resource "aws_cloudfront_function" "ivs_manifest_rewrite" {
+  name    = "${var.project_name}-ivs-manifest-rewrite"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  comment = "Rewrites live-webrtc/pool-N/<anything> to that slot's real IVS manifest path"
+
+  # Unlike live_manifest_rewrite, always rewrites to the SAME fixed target
+  # for a given slot regardless of the requested filename - there's only
+  # ever one real thing to fetch through this route (the master manifest
+  # itself; see this section's own header comment for why nothing else
+  # ever reaches CloudFront at all).
+  code = <<-JS
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+      var prefix = '/live-webrtc/';
+      var paths = ${jsonencode(local.ivs_playback_paths)};
+      if (uri.substring(0, prefix.length) === prefix) {
+        var rest = uri.substring(prefix.length); // "pool-2/master.m3u8"
+        var slashIndex = rest.indexOf('/');
+        var slug = slashIndex > -1 ? rest.substring(0, slashIndex) : rest; // "pool-2"
+        if (paths[slug]) {
+          request.uri = paths[slug];
+        }
+      }
+      return request;
+    }
+  JS
+}
+
 resource "aws_cloudfront_distribution" "processed" {
   enabled = true
   comment = "${var.project_name} app + processed video playback"
@@ -165,6 +246,23 @@ resource "aws_cloudfront_distribution" "processed" {
       http_port              = 80
       https_port             = 443
       origin_protocol_policy = "https-only" # MediaPackage v2 egress is HTTPS-only
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  # Browser/WebRTC live playback - one origin for the whole 5-slot IVS pool,
+  # same "shared hostname" reasoning as live-mediapackage above (see this
+  # file's "Live playback (browser/WebRTC)" section for the real difference
+  # that matters: this origin only ever serves the *first* request of a
+  # playback session, never variant playlists/segments).
+  origin {
+    domain_name = local.ivs_playback_host
+    origin_id   = "ivs-playback"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only" # IVS playback is HTTPS-only
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
@@ -214,6 +312,39 @@ resource "aws_cloudfront_distribution" "processed" {
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.live_manifest_rewrite.arn
+    }
+  }
+
+  # Browser/WebRTC live playback - same path-matched-before-VOD reasoning
+  # and ordering constraint as live/pool-*/* above (must stay before both
+  # VOD behaviors below). One real difference from that sibling behavior:
+  # origin_request_policy_id is set explicitly here, where live/pool-*/*
+  # doesn't need one. IVS's playback restriction policy (ivs.tf) checks the
+  # HTTP Origin header on every request - without forwarding it through to
+  # IVS's origin, that check would see no Origin header at all on this
+  # first hop and reject it. all_viewer_except_host is what's already used
+  # on the default (app) behavior for the same reason (forward everything
+  # except Host) - reused here for the one header it actually needs to
+  # carry, not because live playback needs the *rest* of what it forwards.
+  ordered_cache_behavior {
+    path_pattern             = "live-webrtc/pool-*/*"
+    allowed_methods          = ["GET", "HEAD"]
+    cached_methods           = ["GET", "HEAD"]
+    target_origin_id         = "ivs-playback"
+    viewer_protocol_policy   = "redirect-to-https"
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+
+    # Same signed-cookie key group as everything else, for consistency and
+    # as a real (if partial) gate on this first hop - see this section's
+    # header comment above the origin block for why it's only ever partial
+    # for this specific behavior (can't reach the requests that bypass
+    # CloudFront entirely).
+    trusted_key_groups = [aws_cloudfront_key_group.playback.id]
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.ivs_manifest_rewrite.arn
     }
   }
 

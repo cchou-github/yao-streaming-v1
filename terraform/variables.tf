@@ -200,3 +200,23 @@ variable "ivs_channel_pool_size" {
   type        = number
   default     = 5
 }
+
+variable "ivs_playback_allowed_origins" {
+  description = <<-EOT
+    Origins allowed to fetch IVS playback (see aws_ivs_playback_restriction_policy
+    in ivs.tf) - a real security boundary, not a placeholder to ignore.
+    Defaults to any CloudFront-hosted origin because this project has no
+    stable, pre-known domain yet (no custom domain/ACM cert provisioned):
+    the real distribution domain is only known *after* `aws_cloudfront_distribution.processed`
+    is created, and that resource itself depends on the IVS channels
+    existing first (their playback_url feeds the CloudFront origin/function) -
+    referencing the distribution's own computed domain_name here directly
+    would be a genuine Terraform dependency cycle, not just an inconvenience.
+    A plain variable sidesteps that (a variable is an input, not a computed
+    resource attribute, so it can't participate in a dependency cycle).
+    Once a custom domain exists, tighten this to that exact domain via
+    `terraform.tfvars` - no other change needed anywhere else.
+  EOT
+  type        = list(string)
+  default     = ["https://*.cloudfront.net"]
+}

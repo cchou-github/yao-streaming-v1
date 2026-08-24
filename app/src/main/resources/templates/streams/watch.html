@@ -50,7 +50,7 @@
     <!-- Playable -->
     <div th:if="${stream.playable}">
         <div class="player">
-            <video id="player" controls playsinline preload="metadata"></video>
+            <video id="player" controls playsinline preload="metadata" crossorigin="anonymous"></video>
         </div>
         <p class="error" id="player-error" hidden></p>
     </div>

@@ -1,7 +1,12 @@
 package com.yaostreaming.api.live;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +25,43 @@ class StreamStatusTransitionsTest {
 	@BeforeEach
 	void setUp() {
 		statusTransitions = new StreamStatusTransitions(streamRepository);
+	}
+
+	@Test
+	void markLiveDelegatesToTheCasUpdateAndReportsSuccess() {
+		when(streamRepository.markLive(eq(1L), any(Instant.class))).thenReturn(1);
+
+		assertThat(statusTransitions.markLive(1L)).isTrue();
+		verify(streamRepository).markLive(eq(1L), any(Instant.class));
+	}
+
+	@Test
+	void markLiveReportsFalseWhenTheRowAlreadyLeftStarting() {
+		when(streamRepository.markLive(eq(1L), any(Instant.class))).thenReturn(0);
+
+		assertThat(statusTransitions.markLive(1L)).isFalse();
+	}
+
+	@Test
+	void markEndingRequestedMovesALiveStreamToEnding() {
+		when(streamRepository.changeStatus(1L, StreamStatus.LIVE, StreamStatus.ENDING)).thenReturn(1);
+
+		assertThat(statusTransitions.markEndingRequested(1L)).isTrue();
+	}
+
+	@Test
+	void markEndingRequestedIsANoOpWhenTheStreamIsNotLive() {
+		when(streamRepository.changeStatus(1L, StreamStatus.LIVE, StreamStatus.ENDING)).thenReturn(0);
+
+		assertThat(statusTransitions.markEndingRequested(1L)).isFalse();
+	}
+
+	@Test
+	void markEndedDelegatesToTheCasUpdateAndReportsSuccess() {
+		when(streamRepository.markEnded(eq(1L), any(Instant.class))).thenReturn(1);
+
+		assertThat(statusTransitions.markEnded(1L)).isTrue();
+		verify(streamRepository).markEnded(eq(1L), any(Instant.class));
 	}
 
 	@Test

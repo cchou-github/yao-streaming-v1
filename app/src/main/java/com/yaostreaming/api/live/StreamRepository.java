@@ -1,5 +1,6 @@
 package com.yaostreaming.api.live;
 
+import java.time.Instant;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -17,6 +18,23 @@ public interface StreamRepository extends JpaRepository<Stream, Long> {
 	@Modifying
 	@Query("update Stream s set s.status = :to where s.id = :id and s.status = :from")
 	int changeStatus(@Param("id") Long id, @Param("from") StreamStatus from, @Param("to") StreamStatus to);
+
+	/**
+	 * The only path into {@code STARTING} is {@link #claimChannel}, so that's
+	 * the only prior status this ever needs to move out of - same reasoning
+	 * as {@code VideoRepository.completeIfStillIn} for recording an extra
+	 * field in the same atomic update as the status change.
+	 */
+	@Modifying
+	@Query("update Stream s set s.status = 'LIVE', s.startedAt = :startedAt "
+			+ "where s.id = :id and s.status = 'STARTING'")
+	int markLive(@Param("id") Long id, @Param("startedAt") Instant startedAt);
+
+	/** The only path into {@code ENDING} is {@link #changeStatus}'s LIVE -> ENDING call. */
+	@Modifying
+	@Query("update Stream s set s.status = 'ENDED', s.endedAt = :endedAt "
+			+ "where s.id = :id and s.status = 'ENDING'")
+	int markEnded(@Param("id") Long id, @Param("endedAt") Instant endedAt);
 
 	/**
 	 * Atomically claims {@code channelId} for {@code streamId}, moving the

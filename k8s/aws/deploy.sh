@@ -27,6 +27,8 @@ CLOUDFRONT_KEY_PAIR_ID=$(terraform -chdir="$TF_DIR" output -raw cloudfront_key_p
 CLOUDFRONT_PRIVATE_KEY=$(terraform -chdir="$TF_DIR" output -raw cloudfront_playback_private_key_pem)
 LIVE_POOL_CHANNEL_IDS=$(terraform -chdir="$TF_DIR" output -raw live_pool_channel_ids)
 LIVE_POOL_INPUT_IDS=$(terraform -chdir="$TF_DIR" output -raw live_pool_input_ids)
+IVS_POOL_CHANNEL_ARNS=$(terraform -chdir="$TF_DIR" output -raw ivs_pool_channel_arns)
+IVS_POOL_INGEST_ENDPOINTS=$(terraform -chdir="$TF_DIR" output -raw ivs_pool_ingest_endpoints)
 
 echo "==> Refreshing kubeconfig (cluster may be new since the last apply)"
 aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER" >/dev/null
@@ -56,6 +58,11 @@ echo "==> Patching LIVE_POOL_CHANNEL_IDS/INPUT_IDS (also not stable across a"
 echo "    destroy+apply cycle - a new pool gets new channel ARNs/input ids)"
 sed -i "s|LIVE_POOL_CHANNEL_IDS:.*|LIVE_POOL_CHANNEL_IDS: $LIVE_POOL_CHANNEL_IDS|" "$APP_YAML"
 sed -i "s|LIVE_POOL_INPUT_IDS:.*|LIVE_POOL_INPUT_IDS: $LIVE_POOL_INPUT_IDS|" "$APP_YAML"
+
+echo "==> Patching IVS_POOL_CHANNEL_ARNS/INGEST_ENDPOINTS (same reasoning -"
+echo "    a new pool gets new channel ARNs/ingest endpoints)"
+sed -i "s|IVS_POOL_CHANNEL_ARNS:.*|IVS_POOL_CHANNEL_ARNS: $IVS_POOL_CHANNEL_ARNS|" "$APP_YAML"
+sed -i "s|IVS_POOL_INGEST_ENDPOINTS:.*|IVS_POOL_INGEST_ENDPOINTS: $IVS_POOL_INGEST_ENDPOINTS|" "$APP_YAML"
 
 echo "==> Recreating app-secret with the current RDS password + CloudFront signing key"
 kubectl create secret generic app-secret \

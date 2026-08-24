@@ -185,3 +185,18 @@ variable "live_channel_pool_size" {
   type        = number
   default     = 5
 }
+
+variable "ivs_channel_pool_size" {
+  description = <<-EOT
+    Number of pre-provisioned IVS channels for the browser/WebRTC go-live
+    path. Sized independently of
+    live_channel_pool_size - a separate AWS service, separate pool, separate
+    concurrent-stream cap. Unlike MediaLive, IVS channels cost nothing while
+    idle (billed only for actual streaming minutes - verified against AWS's
+    own pricing page), so this pool exists for routing/cap-consistency
+    reasons, not to avoid idle billing the way the MediaLive pool's fixed
+    size does.
+  EOT
+  type        = number
+  default     = 5
+}

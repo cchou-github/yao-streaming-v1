@@ -124,3 +124,48 @@ resource "aws_iam_role_policy_attachment" "app_irsa_mediapackage" {
   role       = aws_iam_role.app_irsa.name
   policy_arn = aws_iam_policy.app_mediapackage_control.arn
 }
+
+# IVS control for the browser/WebRTC go-live path (ivs.tf) - a separate
+# policy/attachment from the MediaLive ones above, distinct service/ARN
+# namespace, same reasoning app_mediapackage_control's own comment gives.
+#
+# Two statements with genuinely different resource types, not one combined
+# statement - confirmed against AWS's IAM action-to-resource-type mapping
+# (the Service Authorization Reference's own data, since the live page
+# itself is a JS app with no static content to fetch): CreateStreamKey and
+# DeleteStreamKey both require a *stream-key* ARN
+# (arn:...:ivs:...:stream-key/id), not the channel ARN, even though
+# channelArn is CreateStreamKey's own request parameter - StopStream is the
+# one that requires a *channel* ARN.
+#
+# CreateStreamKey/DeleteStreamKey can only be wildcarded to stream-key/* in
+# this account/region, not narrowed to the pool's specific channels the way
+# app_medialive_control's UpdateInput statement narrows to specific input
+# ARNs - a stream key's own ARN is assigned by AWS at creation time and
+# carries no reference back to its parent channel, so Terraform has no
+# per-channel stream-key ARN to scope to in advance. Accepted gap, not
+# missed: StopStream (the action that actually terminates a session) is
+# scoped precisely.
+data "aws_iam_policy_document" "app_ivs_control" {
+  statement {
+    sid       = "RotatePoolStreamKeys"
+    actions   = ["ivs:CreateStreamKey", "ivs:DeleteStreamKey"]
+    resources = ["arn:aws:ivs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:stream-key/*"]
+  }
+
+  statement {
+    sid       = "StopPoolStreams"
+    actions   = ["ivs:StopStream"]
+    resources = [for c in aws_ivs_channel.pool : c.arn]
+  }
+}
+
+resource "aws_iam_policy" "app_ivs_control" {
+  name   = "${var.project_name}-app-ivs-control"
+  policy = data.aws_iam_policy_document.app_ivs_control.json
+}
+
+resource "aws_iam_role_policy_attachment" "app_irsa_ivs" {
+  role       = aws_iam_role.app_irsa.name
+  policy_arn = aws_iam_policy.app_ivs_control.arn
+}

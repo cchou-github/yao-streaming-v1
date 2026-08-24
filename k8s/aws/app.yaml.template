@@ -71,6 +71,15 @@ data:
   LIVE_POOL_INPUT_IDS: pending-terraform-apply
   LIVE_POOL_ORIGIN_SLUGS: pool-0,pool-1,pool-2,pool-3,pool-4
   LIVE_POOL_CHANNEL_GROUP_NAME: yao-streaming-live-pool
+  # IVS pool (browser/WebRTC go-live path) - same reasoning as the
+  # LIVE_POOL_* block above: CHANNEL_ARNS/INGEST_ENDPOINTS aren't stable
+  # across a destroy+apply cycle so they stay placeholders here, patched by
+  # deploy.sh on every run; ORIGIN_SLUGS is deterministic from
+  # var.ivs_channel_pool_size so it's baked in directly.
+  IVS_ENABLED: "false"
+  IVS_POOL_CHANNEL_ARNS: pending-terraform-apply
+  IVS_POOL_INGEST_ENDPOINTS: pending-terraform-apply
+  IVS_POOL_ORIGIN_SLUGS: pool-0,pool-1,pool-2,pool-3,pool-4
 
 ---
 # IRSA: replaces the kind manifests' static AWS_ACCESS_KEY_ID/

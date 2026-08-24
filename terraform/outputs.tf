@@ -127,3 +127,23 @@ output "live_pool_origin_slugs" {
   description = "CloudFront path-prefix slugs (pool-0..pool-N-1) - deterministic, not derived from any resource, listed here purely for symmetry/documentation with the other two live_pool_* outputs."
   value       = join(",", [for i in range(var.live_channel_pool_size) : "pool-${i}"])
 }
+
+# The IVS pool's own equivalents (ivs.tf) - no ivs_pool_input_ids output,
+# unlike live_pool_input_ids: IVS channels have no separate "input" resource
+# the way MediaLive has channel+input as two distinct things - the channel
+# itself is the ingest endpoint. Index-correlated with each other, same as
+# the live_pool_* outputs above.
+output "ivs_pool_channel_arns" {
+  description = "IVS channel ARNs, one per pool slot - what IvsChannelPool passes to CreateStreamKey/StopStream (a later PR)."
+  value       = join(",", [for c in aws_ivs_channel.pool : c.arn])
+}
+
+output "ivs_pool_ingest_endpoints" {
+  description = "IVS channel ingest endpoints, one per pool slot - static per channel (unlike the stream key, which rotates per claim). Exact format/how it's assembled into a full RTMPS/WebRTC publish target is a later PR's concern; this output only wires the raw attribute through."
+  value       = join(",", [for c in aws_ivs_channel.pool : c.ingest_endpoint])
+}
+
+output "ivs_pool_origin_slugs" {
+  description = "CloudFront path-prefix slugs (pool-0..pool-N-1) for the IVS pool - same deterministic-not-resource-derived reasoning as live_pool_origin_slugs above."
+  value       = join(",", [for i in range(var.ivs_channel_pool_size) : "pool-${i}"])
+}

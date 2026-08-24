@@ -173,3 +173,15 @@ variable "irsa_service_account_name" {
   type    = string
   default = "yao-streaming-app"
 }
+
+variable "live_channel_pool_size" {
+  description = <<-EOT
+    Number of pre-provisioned MediaLive channels. Fixed pool, not
+    autoscaled - the app only ever calls
+    StartChannel/StopChannel/DescribeChannel against these, never
+    CreateChannel/DeleteChannel. Changing this value adds/removes slots on
+    the next apply; it does not touch existing ones.
+  EOT
+  type        = number
+  default     = 5
+}

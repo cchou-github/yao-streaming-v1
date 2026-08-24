@@ -58,3 +58,30 @@ resource "aws_iam_role_policy_attachment" "app_irsa_s3" {
   role       = aws_iam_role.app_irsa.name
   policy_arn = aws_iam_policy.app_s3_access.arn
 }
+
+# First permission app_irsa gets beyond S3. Deliberately narrow: only the
+# three read/lifecycle calls LiveChannelPool ever needs
+# (Start/Stop/DescribeChannel) - never Create/Delete, since the pool is a
+# fixed, Terraform-managed set of 5 channels the app is only ever allowed
+# to turn on and off, not provision or destroy. Scoped to the CFN-wrapped
+# channels' own ARNs (medialive.tf), same scoping discipline as
+# app_s3_access above.
+data "aws_iam_policy_document" "app_medialive_control" {
+  statement {
+    sid     = "StartStopDescribePoolChannels"
+    actions = ["medialive:StartChannel", "medialive:StopChannel", "medialive:DescribeChannel"]
+    resources = [
+      for s in aws_cloudformation_stack.medialive_channel : s.outputs["ChannelArn"]
+    ]
+  }
+}
+
+resource "aws_iam_policy" "app_medialive_control" {
+  name   = "${var.project_name}-app-medialive-control"
+  policy = data.aws_iam_policy_document.app_medialive_control.json
+}
+
+resource "aws_iam_role_policy_attachment" "app_irsa_medialive" {
+  role       = aws_iam_role.app_irsa.name
+  policy_arn = aws_iam_policy.app_medialive_control.arn
+}

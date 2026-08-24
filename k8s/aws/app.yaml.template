@@ -59,6 +59,16 @@ data:
   CLOUDFRONT_ENABLED: "true"
   CLOUDFRONT_DOMAIN_NAME: pending-terraform-apply.cloudfront.net
   CLOUDFRONT_KEY_PAIR_ID: pending-terraform-apply
+  # Off for now - no app code reads these yet, that's a separate follow-up.
+  # LIVE_POOL_CHANNEL_IDS/INGEST_URLS aren't stable across a destroy+apply
+  # cycle (new channels, new ARNs) so they stay placeholders here, same
+  # reasoning as CLOUDFRONT_DOMAIN_NAME/KEY_PAIR_ID above - deploy.sh
+  # patches both on every run. LIVE_POOL_ORIGIN_SLUGS is deterministic
+  # (always pool-0..pool-4) so it's baked in directly, no patching needed.
+  LIVE_ENABLED: "false"
+  LIVE_POOL_CHANNEL_IDS: pending-terraform-apply
+  LIVE_POOL_INGEST_URLS: pending-terraform-apply
+  LIVE_POOL_ORIGIN_SLUGS: pool-0,pool-1,pool-2,pool-3,pool-4
 
 ---
 # IRSA: replaces the kind manifests' static AWS_ACCESS_KEY_ID/

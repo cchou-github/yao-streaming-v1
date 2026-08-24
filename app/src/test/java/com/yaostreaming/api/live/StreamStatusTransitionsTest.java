@@ -46,14 +46,21 @@ class StreamStatusTransitionsTest {
 	void markEndingRequestedMovesALiveStreamToEnding() {
 		when(streamRepository.changeStatus(1L, StreamStatus.LIVE, StreamStatus.ENDING)).thenReturn(1);
 
-		assertThat(statusTransitions.markEndingRequested(1L)).isTrue();
+		assertThat(statusTransitions.markEndingRequested(1L, StreamStatus.LIVE)).isTrue();
 	}
 
 	@Test
-	void markEndingRequestedIsANoOpWhenTheStreamIsNotLive() {
+	void markEndingRequestedMovesAStartingStreamToEnding() {
+		when(streamRepository.changeStatus(1L, StreamStatus.STARTING, StreamStatus.ENDING)).thenReturn(1);
+
+		assertThat(statusTransitions.markEndingRequested(1L, StreamStatus.STARTING)).isTrue();
+	}
+
+	@Test
+	void markEndingRequestedIsANoOpWhenTheStreamIsNotInTheGivenFromStatus() {
 		when(streamRepository.changeStatus(1L, StreamStatus.LIVE, StreamStatus.ENDING)).thenReturn(0);
 
-		assertThat(statusTransitions.markEndingRequested(1L)).isFalse();
+		assertThat(statusTransitions.markEndingRequested(1L, StreamStatus.LIVE)).isFalse();
 	}
 
 	@Test
@@ -69,6 +76,13 @@ class StreamStatusTransitionsTest {
 		statusTransitions.markFailed(1L);
 
 		verify(streamRepository).changeStatus(1L, StreamStatus.STARTING, StreamStatus.FAILED);
+	}
+
+	@Test
+	void claimChannelDelegatesToTheCasUpdateAndReturnsTheRowCount() {
+		when(streamRepository.claimChannel(1L, "channel-0", "pool-0")).thenReturn(1);
+
+		assertThat(statusTransitions.claimChannel(1L, "channel-0", "pool-0")).isEqualTo(1);
 	}
 
 }

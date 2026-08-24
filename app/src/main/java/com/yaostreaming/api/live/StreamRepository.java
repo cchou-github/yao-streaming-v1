@@ -10,6 +10,10 @@ import org.springframework.data.repository.query.Param;
 
 public interface StreamRepository extends JpaRepository<Stream, Long> {
 
+	/** Live catalog listing. Fetches the streamer eagerly to avoid a query per row. */
+	@Query("select s from Stream s join fetch s.user where s.status = 'LIVE' order by s.startedAt desc")
+	List<Stream> findLiveOrderByStartedAtDesc();
+
 	/**
 	 * Backs the internal live-state callback: given a channel ARN off a
 	 * MediaLive EventBridge event, finds whichever stream currently has it
@@ -20,6 +24,17 @@ public interface StreamRepository extends JpaRepository<Stream, Long> {
 	 * own guard is what keeps at most one row ever matching this at a time.
 	 */
 	Optional<Stream> findByChannelIdAndStatusIn(String channelId, List<StreamStatus> statuses);
+
+	/**
+	 * The most recent of a user's own channel-bound streams, if any - backs
+	 * the one-live-stream-per-user gate on both the go-live page and
+	 * {@code goLive} itself. {@code findFirst...OrderBy...Desc}, not a bare
+	 * {@code Optional}-returning derived query: applies {@code LIMIT 1} at
+	 * the DB level, so this can never throw even if more than one row ever
+	 * matches (shouldn't happen once {@code goLive} enforces this, but
+	 * doesn't rely on that holding perfectly).
+	 */
+	Optional<Stream> findFirstByUser_IdAndStatusInOrderByCreatedAtDesc(Long userId, List<StreamStatus> statuses);
 
 	/**
 	 * Moves a row between statuses only if it is still in {@code from},

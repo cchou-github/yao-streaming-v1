@@ -27,6 +27,18 @@ public interface LiveChannelPool {
 	/** Stops the channel currently bound to {@code streamId}, if any. */
 	void release(Long streamId);
 
+	/**
+	 * Called once the async live-state callback confirms a channel has
+	 * actually finished stopping - see {@code LiveCallbackController} - not
+	 * at {@link #release} time. {@code StopChannel} is accept-and-return, so
+	 * at {@code release()} time the channel is typically still physically
+	 * running/flushing its last segments; only running MediaPackage cleanup
+	 * here, once that's genuinely done, avoids clearing an origin
+	 * endpoint's content a moment before those trailing segments still
+	 * land in it - confirmed live to be a real, exploitable gap otherwise.
+	 */
+	void confirmStopped(Long streamId);
+
 	record ReservedChannel(String channelId, String originSlug, String ingestUrl) {
 	}
 

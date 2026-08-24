@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.yaostreaming.api.live.LiveChannelPool;
 import com.yaostreaming.api.live.Stream;
 import com.yaostreaming.api.live.StreamRepository;
 import com.yaostreaming.api.live.StreamStatus;
@@ -51,6 +52,9 @@ class LiveCallbackControllerTest {
 	private StreamStatusTransitions statusTransitions;
 
 	@MockitoBean
+	private LiveChannelPool liveChannelPool;
+
+	@MockitoBean
 	private CloudFrontProperties cloudFrontProperties;
 
 	private static Stream activeStream(Long id) {
@@ -75,10 +79,18 @@ class LiveCallbackControllerTest {
 
 		verify(statusTransitions).markLive(1L);
 		verify(statusTransitions, never()).markEnded(any());
+		verify(liveChannelPool, never()).confirmStopped(any());
 	}
 
+	/**
+	 * This, not LiveChannelPool.release(), is where MediaPackage cleanup
+	 * for the ended stream's slot actually happens now - confirmed live
+	 * that release()-time cleanup runs before the channel's final segment
+	 * flush is done, letting real content leak into the next claimant's
+	 * session. See LiveChannelPool.confirmStopped's own javadoc.
+	 */
 	@Test
-	void stoppedCallbackMarksTheStreamEndedAndReturnsNoContent() throws Exception {
+	void stoppedCallbackMarksTheStreamEndedConfirmsStoppedAndReturnsNoContent() throws Exception {
 		when(streamRepository.findByChannelIdAndStatusIn("channel-0",
 				List.of(StreamStatus.STARTING, StreamStatus.LIVE, StreamStatus.ENDING)))
 				.thenReturn(Optional.of(activeStream(2L)));
@@ -93,6 +105,31 @@ class LiveCallbackControllerTest {
 
 		verify(statusTransitions).markEnded(2L);
 		verify(statusTransitions, never()).markLive(any());
+		verify(liveChannelPool).confirmStopped(2L);
+	}
+
+	/**
+	 * EventBridge is at-least-once - a redelivered STOPPED callback that
+	 * no-ops (markEnded returns false, already applied) shouldn't
+	 * re-trigger the MediaPackage reset. Harmless either way since
+	 * ResetOriginEndpointState is idempotent, but no reason to make the
+	 * redundant call.
+	 */
+	@Test
+	void aRedeliveredStoppedCallbackDoesNotReconfirmStopped() throws Exception {
+		when(streamRepository.findByChannelIdAndStatusIn("channel-0",
+				List.of(StreamStatus.STARTING, StreamStatus.LIVE, StreamStatus.ENDING)))
+				.thenReturn(Optional.of(activeStream(2L)));
+		when(statusTransitions.markEnded(2L)).thenReturn(false);
+
+		mockMvc.perform(post("/internal/live/callback")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"channelId":"channel-0","status":"STOPPED"}
+								"""))
+				.andExpect(status().isNoContent());
+
+		verify(liveChannelPool, never()).confirmStopped(any());
 	}
 
 	@Test

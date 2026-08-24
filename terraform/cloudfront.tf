@@ -73,6 +73,62 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
+# --- Live playback: routes live/pool-{N}/... to MediaPackage v2 ---
+#
+# One CloudFront origin + one ordered_cache_behavior covers the whole
+# 5-slot pool, not five of each - verified against AWS's own docs rather
+# than assumed:
+#
+# 1. A MediaPackage v2 channel GROUP has exactly one shared "egress domain"
+#    (Fn::GetAtt EgressDomain on AWS::MediaPackageV2::ChannelGroup - "The
+#    egress domain of the channel group") - every channel/origin-endpoint
+#    under it is served from that same hostname, not a per-slot one. So one
+#    CloudFront origin covers the whole pool.
+# 2. A v2 HLS manifest's real path is fully deterministic, not random:
+#    https://{egress-domain}/out/v1/{channel-group-name}/{channel-name}/{origin-endpoint-name}/{manifest-name}.m3u8
+#    - every segment is a name this project's own Terraform already chose
+#    (mediapackage.tf sets channel_name = origin_endpoint_name = "pool-N"),
+#    never a MediaPackage-generated random id the way v1's URLs were.
+#
+# That real path doesn't match the clean live/pool-N/... convention the
+# plan calls for (needed so live traffic can be told apart from VOD's
+# *.m3u8/*.ts extension-matched behaviors, which key off file extension
+# alone - see this file's header comment). CloudFront's origin_path only
+# ever *prepends* to the full incoming request path, it can't replace a
+# matched prefix - there's no native "strip this prefix" option on a cache
+# behavior. A CloudFront Function is the standard tool for exactly this
+# rewrite, and one generic function (parameterized by whatever slug is in
+# the URL, not one per slot) covers all 5 slots identically.
+resource "aws_cloudfront_function" "live_manifest_rewrite" {
+  name    = "${var.project_name}-live-manifest-rewrite"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  comment = "Rewrites live/pool-N/<file> to MediaPackage v2's real /out/v1/<group>/pool-N/pool-N/<file> path"
+
+  # String methods only, no regex/template literals: CloudFront Functions'
+  # JS engine has a restricted feature set, and a JS template literal's
+  # ${...} would collide with Terraform's own heredoc interpolation syntax
+  # below regardless.
+  code = <<-JS
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+      var prefix = '/live/';
+      if (uri.substring(0, prefix.length) === prefix) {
+        var rest = uri.substring(prefix.length); // "pool-2/master.m3u8"
+        var slashIndex = rest.indexOf('/');
+        if (slashIndex > -1) {
+          var slug = rest.substring(0, slashIndex); // "pool-2"
+          var file = rest.substring(slashIndex + 1); // "master.m3u8"
+          request.uri = '/out/v1/${awscc_mediapackagev2_channel_group.pool.channel_group_name}/'
+              + slug + '/' + slug + '/' + file;
+        }
+      }
+      return request;
+    }
+  JS
+}
+
 resource "aws_cloudfront_distribution" "processed" {
   enabled = true
   comment = "${var.project_name} app + processed video playback"
@@ -98,6 +154,21 @@ resource "aws_cloudfront_distribution" "processed" {
     }
   }
 
+  # Live playback - one origin for the whole 5-slot pool. See this file's
+  # "Live playback" section (above, next to aws_cloudfront_function) for
+  # why a single shared origin is correct here, not five - one per slot.
+  origin {
+    domain_name = awscc_mediapackagev2_channel_group.pool.egress_domain
+    origin_id   = "live-mediapackage"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only" # MediaPackage v2 egress is HTTPS-only
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
   # Everything not matched by the behaviors below goes to the app - login,
   # catalog, watch pages (HTML), uploads. No trusted_key_groups here: the
   # app handles its own authentication/session, CloudFront just proxies it
@@ -109,6 +180,41 @@ resource "aws_cloudfront_distribution" "processed" {
     viewer_protocol_policy   = "redirect-to-https"
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+  }
+
+  # Live playback, all 5 pool slots at once: path-matched (live/pool-N/...),
+  # not extension-matched like the two VOD behaviors below, since a live
+  # manifest/segment shares the exact same *.m3u8/*.ts extensions as VOD's
+  # but needs a different origin (MediaPackage, not S3) and different
+  # caching (disabled - see below). caching_disabled, not caching_optimized:
+  # a live manifest updates every few seconds as new segments land, unlike
+  # VOD's finished, immutable output.
+  #
+  # Ordering within this resource is significant and load-bearing:
+  # CloudFront picks the FIRST ordered_cache_behavior whose path_pattern
+  # matches, not the most specific one - confirmed live, the hard way,
+  # against real AWS (aws cloudfront get-distribution-config), after this
+  # block sat *after* the VOD *.m3u8/*.ts behaviors below and every live
+  # request silently matched *.m3u8 first, routing to the VOD S3 origin and
+  # 403ing with an S3-shaped AccessDenied instead of ever reaching
+  # MediaPackage. Must stay before both VOD behaviors.
+  ordered_cache_behavior {
+    path_pattern           = "live/pool-*/*"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "live-mediapackage"
+    viewer_protocol_policy = "redirect-to-https"
+    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_disabled.id
+
+    # Same signed-cookie key group as VOD, for consistency (one set of
+    # cookies covers both catalog and live once a viewer's watch page sets
+    # them) rather than because anything requires it to be shared.
+    trusted_key_groups = [aws_cloudfront_key_group.playback.id]
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.live_manifest_rewrite.arn
+    }
   }
 
   # The actual video files. Matched by extension rather than a /videos/*

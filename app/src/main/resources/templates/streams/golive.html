@@ -10,8 +10,9 @@
         form { max-width: 32rem; margin-top: 1.5rem; }
         label { display: block; margin-top: 1rem; font-weight: 600; }
         input, textarea, button { width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }
-        button { margin-top: 1.5rem; cursor: pointer; }
-        #result {
+        .go-live-buttons { display: flex; gap: .75rem; margin-top: 1.5rem; }
+        .go-live-buttons button { margin-top: 0; cursor: pointer; }
+        #result, #webrtc-result {
             max-width: 32rem;
             margin-top: 1.5rem;
             background: var(--surface);
@@ -29,6 +30,14 @@
             margin-top: .35rem;
             font-family: ui-monospace, Menlo, Consolas, monospace;
             font-size: .85rem;
+        }
+        #webrtc-preview {
+            width: 100%;
+            max-width: 32rem;
+            margin-top: 1rem;
+            border-radius: .5rem;
+            background: #000;
+            aspect-ratio: 16 / 9;
         }
         .error { color: var(--failed); margin-top: 1rem; }
         #active-stream {
@@ -50,8 +59,10 @@
 
     <!-- Already have a channel-bound stream (STARTING/LIVE/ENDING): show it
          instead of the form - mirrors LiveStreamingService.goLive's own
-         one-stream-per-user rule, and is reachable from a fresh page load,
-         not just right after submitting the form below. -->
+         one-stream-per-user rule (mechanism-agnostic - one stream total,
+         regardless of whether it's OBS- or browser-originated), and is
+         reachable from a fresh page load, not just right after submitting
+         the form below. -->
     <div id="active-stream" th:if="${activeStream}">
         <p><strong>You already have a stream in progress.</strong></p>
         <p class="facts">
@@ -68,7 +79,10 @@
     </div>
 
     <th:block th:unless="${activeStream}">
-        <p class="muted">Fill this in, then point your encoder (e.g. OBS) at the ingest URL you get back.</p>
+        <p class="muted">
+            Fill this in, then either point your encoder (e.g. OBS) at the ingest URL you get back, or go live
+            straight from your browser camera - no external software needed.
+        </p>
 
         <form id="golive-form">
             <label for="title">Title</label>
@@ -77,7 +91,10 @@
             <label for="description">Description (optional)</label>
             <textarea id="description" name="description" rows="3" maxlength="2000"></textarea>
 
-            <button type="submit" id="submit">Go live</button>
+            <div class="go-live-buttons">
+                <button type="submit" id="submit-rtmp">Go live (OBS)</button>
+                <button type="button" id="submit-webrtc">Go live (Browser)</button>
+            </div>
         </form>
 
         <div id="status" class="error" hidden></div>
@@ -91,16 +108,35 @@
             </p>
             <button type="button" id="end-stream" style="margin-top:1rem">End stream</button>
         </div>
+
+        <canvas id="webrtc-preview" hidden></canvas>
+
+        <div id="webrtc-result" hidden>
+            <p><strong>You're live from your browser.</strong></p>
+            <p class="muted" style="margin-top:.75rem">
+                Status starts at <code>STARTING</code> - once IVS confirms the stream is
+                actually running, it shows up on <a th:href="@{/streams}">the live catalog</a>.
+            </p>
+            <button type="button" id="end-webrtc-stream" style="margin-top:1rem">End stream</button>
+        </div>
     </th:block>
 </main>
 
+<!-- Loaded only when the browser go-live button is actually used (see
+     loadBroadcastClientSdk below) - most visits only use OBS and never
+     need this. Version pinned, same reasoning any dependency here would
+     get: an unpinned CDN build could silently change behavior underneath
+     this page with no warning. -->
 <script>
     const csrfToken = document.querySelector('meta[name="_csrf"]').content;
     const csrfHeader = document.querySelector('meta[name="_csrf_header"]').content;
+    const BROADCAST_SDK_URL = 'https://web-broadcast.live-video.net/1.38.1/amazon-ivs-web-broadcast.js';
 
-    // Shared by both "End stream" buttons below - the one shown right after
-    // a fresh go-live, and the one shown on page load when this user
-    // already had a stream in progress before the page ever loaded.
+    // Shared by every "End stream" button on this page (RTMP or WebRTC,
+    // fresh-from-go-live or already-in-progress-on-page-load) - the
+    // request is identical either way, LiveStreamingService.endStream
+    // itself resolves which pool to release via the stream's own
+    // ingestMode server-side.
     async function endStream(streamId, button, errorEl) {
         button.disabled = true;
         try {
@@ -128,37 +164,53 @@
 
     const form = document.getElementById('golive-form');
     if (form) {
-        const submit = document.getElementById('submit');
+        const titleInput = document.getElementById('title');
+        const descriptionInput = document.getElementById('description');
+        const rtmpButton = document.getElementById('submit-rtmp');
+        const webrtcButton = document.getElementById('submit-webrtc');
         const status = document.getElementById('status');
         const result = document.getElementById('result');
         const ingestUrlEl = document.getElementById('ingest-url');
         const endButton = document.getElementById('end-stream');
+        const webrtcPreview = document.getElementById('webrtc-preview');
+        const webrtcResult = document.getElementById('webrtc-result');
+        const endWebrtcButton = document.getElementById('end-webrtc-stream');
 
         function fail(message) {
             status.textContent = message;
             status.hidden = false;
         }
 
+        async function goLive(mode) {
+            if (!form.reportValidity()) {
+                return null;
+            }
+            status.hidden = true;
+            const response = await fetch('/api/streams', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', [csrfHeader]: csrfToken },
+                body: JSON.stringify({
+                    title: titleInput.value,
+                    description: descriptionInput.value,
+                    mode: mode
+                })
+            });
+            if (!response.ok) {
+                throw new Error('Could not go live: ' + response.status + ' ' + await response.text());
+            }
+            return response.json();
+        }
+
         let currentStreamId = null;
 
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
-            submit.disabled = true;
-            status.hidden = true;
-
+            rtmpButton.disabled = true;
             try {
-                const response = await fetch('/api/streams', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', [csrfHeader]: csrfToken },
-                    body: JSON.stringify({
-                        title: document.getElementById('title').value,
-                        description: document.getElementById('description').value
-                    })
-                });
-                if (!response.ok) {
-                    throw new Error('Could not go live: ' + response.status + ' ' + await response.text());
+                const stream = await goLive('RTMP');
+                if (stream === null) {
+                    return;
                 }
-                const stream = await response.json();
                 currentStreamId = stream.streamId;
                 ingestUrlEl.textContent = stream.ingestUrl;
                 result.hidden = false;
@@ -168,13 +220,103 @@
                 fail(error.message);
             }
             finally {
-                submit.disabled = false;
+                rtmpButton.disabled = false;
             }
         });
 
         endButton.addEventListener('click', () => {
             if (currentStreamId !== null) {
                 endStream(currentStreamId, endButton, status);
+            }
+        });
+
+        // Loaded lazily, once, only for whichever visitor actually clicks
+        // "Go live (Browser)" - most visits use OBS and never need the SDK
+        // on the page at all.
+        let broadcastSdkPromise = null;
+        function loadBroadcastClientSdk() {
+            if (broadcastSdkPromise === null) {
+                broadcastSdkPromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = BROADCAST_SDK_URL;
+                    script.onload = () => resolve(window.IVSBroadcastClient);
+                    script.onerror = () => reject(new Error('Could not load the IVS Broadcast SDK'));
+                    document.head.appendChild(script);
+                });
+            }
+            return broadcastSdkPromise;
+        }
+
+        let webrtcStreamId = null;
+        let broadcastClient = null;
+        let cameraStream = null;
+        let microphoneStream = null;
+
+        webrtcButton.addEventListener('click', async () => {
+            webrtcButton.disabled = true;
+            try {
+                const IVSBroadcastClient = await loadBroadcastClientSdk();
+
+                const stream = await goLive('WEBRTC');
+                if (stream === null) {
+                    return;
+                }
+                webrtcStreamId = stream.streamId;
+
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                broadcastClient = IVSBroadcastClient.create({
+                    streamConfig: IVSBroadcastClient.STANDARD_LANDSCAPE,
+                    ingestEndpoint: stream.ingestEndpoint
+                });
+                broadcastClient.attachPreview(webrtcPreview);
+                broadcastClient.addVideoInputDevice(cameraStream, 'camera', { index: 0 });
+                broadcastClient.addAudioInputDevice(microphoneStream, 'mic');
+
+                await broadcastClient.startBroadcast(stream.streamKey);
+
+                webrtcPreview.hidden = false;
+                webrtcResult.hidden = false;
+                form.hidden = true;
+            }
+            catch (error) {
+                fail(error.message);
+                // A partially-started attempt (e.g. getUserMedia succeeded
+                // but startBroadcast failed) shouldn't leave the camera
+                // light on or the claimed channel stuck - same
+                // "don't leave the slot stuck reserved" discipline
+                // IvsChannelPool.reserve's own compensation has server-side.
+                if (cameraStream) {
+                    cameraStream.getTracks().forEach((track) => track.stop());
+                }
+                if (microphoneStream) {
+                    microphoneStream.getTracks().forEach((track) => track.stop());
+                }
+                if (webrtcStreamId !== null) {
+                    await fetch('/api/streams/' + webrtcStreamId + '/end', {
+                        method: 'POST',
+                        headers: { [csrfHeader]: csrfToken }
+                    }).catch(() => {});
+                }
+            }
+            finally {
+                webrtcButton.disabled = false;
+            }
+        });
+
+        endWebrtcButton.addEventListener('click', async () => {
+            if (broadcastClient) {
+                broadcastClient.stopBroadcast();
+            }
+            if (cameraStream) {
+                cameraStream.getTracks().forEach((track) => track.stop());
+            }
+            if (microphoneStream) {
+                microphoneStream.getTracks().forEach((track) => track.stop());
+            }
+            if (webrtcStreamId !== null) {
+                endStream(webrtcStreamId, endWebrtcButton, status);
             }
         });
     }

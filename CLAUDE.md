@@ -30,10 +30,50 @@ unprompted.
   `ffmpeg` pipeline for local dev, and a Lambda submit → MediaConvert →
   EventBridge → Lambda complete → internal-ALB callback pipeline for real
   AWS), and CloudFront + signed-cookie playback are done.
-- **Not yet built**: live streaming (either mechanism).
+- **RTMP live streaming** (OBS/any RTMP encoder → a fixed pool of MediaLive
+  channels → MediaPackage v2, async EventBridge/Lambda confirmation,
+  CloudFront routing, unified live catalog/watch UI): done.
+- **WebRTC live streaming** (browser camera → a second, independent fixed
+  pool of AWS IVS channels via the IVS Broadcast SDK for Web, async
+  confirmation, an IVS Playback Restriction Policy plus CloudFront routing
+  for playback, same unified catalog/watch UI as the RTMP path): done.
+  Coexists with the RTMP path rather than replacing it — a streamer picks
+  one mechanism per broadcast.
+- **Browser camera capture via a WHIP-to-RTMP relay (MediaMTX) — attempted
+  and abandoned.** Everything up through the relay itself worked as
+  designed, but a correctly-transcoded RTMP stream never reliably reached
+  MediaLive from it, despite ruling out every content- and protocol-level
+  cause investigated (codec correctness, keyframe interval, DTS jitter,
+  passthrough vs. re-encode, an FLV sequence-header gap). Superseded by the
+  AWS IVS WebRTC path above, which publishes straight into a channel with no
+  relay/bridge component at all — avoiding this failure mode by
+  construction. Don't re-attempt a WHIP/MediaMTX relay without new
+  information.
+- **Not yet built**: a CI/CD pipeline (building, testing, and deploying are
+  currently manual); a written teardown/rebuild runbook (the process itself
+  works, just isn't documented as one); a reconciliation sweep for videos
+  stuck in `UPLOADING`; locking the ALB down to CloudFront-only traffic; a
+  custom domain/ACM certificate; live-to-VOD archival after a stream ends.
 
 Check `gh pr list --state open` at the start of a session — open PRs are the
 most current source of "what's in flight."
+
+## Architecture, briefly
+
+Local dev and the real-AWS path deliberately diverge: locally, the app
+itself runs `ffmpeg` in-process against LocalStack (no AWS account needed);
+against real AWS, transcoding is entirely offloaded to Lambda + MediaConvert
+and the app is never in that path at all. Classes specific to the local-only
+path are named with a `Local` prefix (`LocalUploadWatcher`,
+`LocalFfmpegTranscodePipeline`, `LocalVideoTranscodeService`) specifically
+because an earlier unprefixed version of this code stayed active in the real
+AWS deployment and silently broke every upload — don't remove that naming
+distinction without understanding why it exists.
+
+Control-plane/data-plane split: the app (EKS/RDS) only ever issues URLs and
+records status — it never touches video bytes. Video bytes flow directly
+between the browser, S3, MediaConvert/MediaLive/MediaPackage v2/AWS IVS, and
+CloudFront. This holds for VOD and both live-streaming paths alike.
 
 ## Resuming on another machine
 
@@ -58,11 +98,16 @@ travels with a clone. A few things don't and need redoing:
 ## Where things actually live
 
 - `app/` — Spring Boot app (Gradle, own `Dockerfile`/`Dockerfile.dev`).
+- `lambda/` — submit/complete transcode Lambdas plus the live-streaming
+  state-change Lambdas, a fully standalone Gradle project, not a submodule
+  of `app/`.
 - `terraform/` — all AWS infra, one file per concern, heavily commented with
   the *why* behind non-obvious choices (read the comments before assuming
   something is arbitrary).
 - `k8s/` vs `k8s/aws/` — local `kind`-cluster manifests vs. the real-AWS
   deployment manifest, deliberately separate rather than templated (see
   `k8s/aws/app.yaml.template`'s own header comment for why).
-- `.claude/skills/` — project-specific Claude Code skills encoding this
-  project's own established workflows.
+- `.claude/skills/` — project-specific Claude Code skills (`deploy`,
+  `verify-live-streaming`) encoding this project's own established
+  workflows, on top of whatever generic AWS/Terraform skills are already
+  available.

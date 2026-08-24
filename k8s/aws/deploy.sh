@@ -22,6 +22,9 @@ echo "==> Reading terraform outputs"
 ECR_URL=$(terraform -chdir="$TF_DIR" output -raw ecr_repository_url)
 RDS_ADDRESS=$(terraform -chdir="$TF_DIR" output -raw rds_address)
 RDS_PASSWORD=$(terraform -chdir="$TF_DIR" output -raw rds_master_password)
+CLOUDFRONT_DOMAIN=$(terraform -chdir="$TF_DIR" output -raw cloudfront_domain_name)
+CLOUDFRONT_KEY_PAIR_ID=$(terraform -chdir="$TF_DIR" output -raw cloudfront_key_pair_id)
+CLOUDFRONT_PRIVATE_KEY=$(terraform -chdir="$TF_DIR" output -raw cloudfront_playback_private_key_pem)
 
 echo "==> Refreshing kubeconfig (cluster may be new since the last apply)"
 aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER" >/dev/null
@@ -42,9 +45,15 @@ echo "    on RDS recreation - bucket names/IRSA ARN/ECR URL are deterministic)"
 sed -i "s|DB_HOST:.*|DB_HOST: $RDS_ADDRESS|" "$APP_YAML"
 sed -i "s|until nc -z .* 3306|until nc -z $RDS_ADDRESS 3306|" "$APP_YAML"
 
-echo "==> Recreating app-secret with the current RDS password"
+echo "==> Patching CLOUDFRONT_DOMAIN_NAME/KEY_PAIR_ID (also not stable across"
+echo "    a destroy+apply cycle - a new distribution gets a new domain/key pair)"
+sed -i "s|CLOUDFRONT_DOMAIN_NAME:.*|CLOUDFRONT_DOMAIN_NAME: $CLOUDFRONT_DOMAIN|" "$APP_YAML"
+sed -i "s|CLOUDFRONT_KEY_PAIR_ID:.*|CLOUDFRONT_KEY_PAIR_ID: $CLOUDFRONT_KEY_PAIR_ID|" "$APP_YAML"
+
+echo "==> Recreating app-secret with the current RDS password + CloudFront signing key"
 kubectl create secret generic app-secret \
   --from-literal=DB_PASSWORD="$RDS_PASSWORD" \
+  --from-literal=CLOUDFRONT_PRIVATE_KEY="$CLOUDFRONT_PRIVATE_KEY" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 echo "==> Applying k8s/aws/app.yaml"

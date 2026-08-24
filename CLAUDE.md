@@ -23,17 +23,14 @@ unprompted.
 ## Current status
 
 - **Foundations**: local dev (Docker Compose + LocalStack), session-backed
-  authentication (MySQL-persisted sessions, not per-pod memory), and a first
-  real AWS deployment (VPC, EKS, RDS, S3, ECR, a public ALB) are done.
-- **VOD**: upload via presigned S3 URL, catalog/watch, and both transcode
-  paths are done - an in-process `ffmpeg` pipeline for local dev, and a
-  Lambda submit → MediaConvert → EventBridge → Lambda complete →
-  internal-ALB callback pipeline for real AWS, verified end-to-end. The app
-  is CloudFront-ready (signed-cookie playback, falling back to a presigned
-  S3 GET when no CDN is provisioned) but no CDN is provisioned yet - see
-  "Not yet built."
-- **Not yet built**: a provisioned CloudFront distribution, and live
-  streaming (either mechanism).
+  authentication (MySQL-persisted sessions, not per-pod memory), and the
+  foundational AWS infrastructure (VPC, EKS, RDS, S3, ECR, a public ALB)
+  are done.
+- **VOD**: upload via presigned S3 URL, both transcode paths (an in-process
+  `ffmpeg` pipeline for local dev, and a Lambda submit → MediaConvert →
+  EventBridge → Lambda complete → internal-ALB callback pipeline for real
+  AWS), and CloudFront + signed-cookie playback are done.
+- **Not yet built**: live streaming (either mechanism).
 
 Check `gh pr list --state open` at the start of a session — open PRs are the
 most current source of "what's in flight."

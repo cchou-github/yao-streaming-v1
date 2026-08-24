@@ -1,11 +1,11 @@
 package com.yaostreaming.api.live.internal;
 
+import com.yaostreaming.api.live.LiveChannelPool;
 import com.yaostreaming.api.live.Stream;
 import com.yaostreaming.api.live.StreamRepository;
 import com.yaostreaming.api.live.StreamStatus;
 import com.yaostreaming.api.live.StreamStatusTransitions;
 import jakarta.validation.Valid;
-import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,17 +39,20 @@ public class LiveCallbackController {
 
 	private final StreamRepository streamRepository;
 	private final StreamStatusTransitions statusTransitions;
+	private final LiveChannelPool liveChannelPool;
 
-	public LiveCallbackController(StreamRepository streamRepository, StreamStatusTransitions statusTransitions) {
+	public LiveCallbackController(StreamRepository streamRepository, StreamStatusTransitions statusTransitions,
+			LiveChannelPool liveChannelPool) {
 		this.streamRepository = streamRepository;
 		this.statusTransitions = statusTransitions;
+		this.liveChannelPool = liveChannelPool;
 	}
 
 	@PostMapping("/callback")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void handleCallback(@Valid @RequestBody LiveCallbackRequest request) {
 		Optional<Stream> stream = streamRepository.findByChannelIdAndStatusIn(request.channelId(),
-				List.of(StreamStatus.STARTING, StreamStatus.LIVE, StreamStatus.ENDING));
+				StreamStatus.CHANNEL_BOUND);
 
 		if (stream.isEmpty()) {
 			// A channel this project doesn't currently have any active
@@ -67,6 +70,17 @@ public class LiveCallbackController {
 			case RUNNING -> statusTransitions.markLive(streamId);
 			case STOPPED -> statusTransitions.markEnded(streamId);
 		};
+
+		// This, not LiveChannelPool.release(), is where MediaPackage
+		// cleanup for this stream's slot actually belongs - see
+		// LiveChannelPool.confirmStopped's own javadoc for why. Gated on
+		// applied too: a redelivered STOPPED callback that no-ops here
+		// shouldn't re-trigger a reset that's already been done (harmless
+		// either way, since ResetOriginEndpointState is idempotent, but
+		// there's no reason to make the redundant call).
+		if (applied && request.status() == LiveCallbackStatus.STOPPED) {
+			liveChannelPool.confirmStopped(streamId);
+		}
 
 		// EventBridge is at-least-once, so a redelivered callback is
 		// expected occasionally, not an error - each CAS write already made

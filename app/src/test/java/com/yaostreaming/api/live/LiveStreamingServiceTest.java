@@ -72,6 +72,22 @@ class LiveStreamingServiceTest {
 	}
 
 	@Test
+	void goLiveThrowsConflictWhenTheCallerAlreadyHasAChannelBoundStream() {
+		ReflectionTestUtils.setField(owner, "id", 1L);
+		Stream existing = new Stream(owner, "Already live");
+		ReflectionTestUtils.setField(existing, "id", 99L);
+		when(streamRepository.findFirstByUser_IdAndStatusInOrderByCreatedAtDesc(1L, StreamStatus.CHANNEL_BOUND))
+				.thenReturn(Optional.of(existing));
+
+		assertThatThrownBy(() -> service.goLive(owner, new GoLiveRequest("My Broadcast", null)))
+				.isInstanceOf(ResponseStatusException.class)
+				.hasMessageContaining("409");
+
+		verify(streamRepository, never()).save(any());
+		verify(liveChannelPool, never()).reserve(any());
+	}
+
+	@Test
 	void goLiveLeavesDescriptionUnsetWhenBlank() {
 		when(liveChannelPool.reserve(any())).thenReturn(
 				Optional.of(new LiveChannelPool.ReservedChannel("channel-0", "pool-0", "rtmp://ingest-0")));
@@ -83,12 +99,41 @@ class LiveStreamingServiceTest {
 		assertThat(saved.getValue().getDescription()).isNull();
 	}
 
+	/**
+	 * Deliberately doesn't verify markEnded here - that's the async
+	 * callback's own job now (LiveCallbackController, once the real
+	 * STOPPED confirmation arrives), not endStream's. See this method's
+	 * own javadoc for why an earlier version marked ENDED synchronously
+	 * right here, and why that's gone now that the actual callback bug is
+	 * fixed.
+	 */
 	@Test
 	void endStreamRequestsEndingAndReleasesTheChannelWhenLive() {
 		Stream stream = new Stream(owner, "My Broadcast");
 		ReflectionTestUtils.setField(stream, "id", 1L);
 		when(streamRepository.findById(1L)).thenReturn(Optional.of(stream));
-		when(statusTransitions.markEndingRequested(1L)).thenReturn(true);
+		when(statusTransitions.markEndingRequested(1L, StreamStatus.LIVE)).thenReturn(true);
+
+		service.endStream(owner, 1L);
+
+		verify(liveChannelPool).release(1L);
+		verify(statusTransitions, never()).markEnded(any());
+		verify(statusTransitions, never()).markEndingRequested(1L, StreamStatus.STARTING);
+	}
+
+	/**
+	 * A stream that never got as far as a RUNNING confirmation still holds a
+	 * real MediaLive channel - confirmed live, the hard way, when an earlier
+	 * version of endStream only tried LIVE and silently no-op'd for this
+	 * exact case, leaving the channel running uncontrolled.
+	 */
+	@Test
+	void endStreamReleasesTheChannelWhenStillStarting() {
+		Stream stream = new Stream(owner, "My Broadcast");
+		ReflectionTestUtils.setField(stream, "id", 1L);
+		when(streamRepository.findById(1L)).thenReturn(Optional.of(stream));
+		when(statusTransitions.markEndingRequested(1L, StreamStatus.LIVE)).thenReturn(false);
+		when(statusTransitions.markEndingRequested(1L, StreamStatus.STARTING)).thenReturn(true);
 
 		service.endStream(owner, 1L);
 
@@ -96,11 +141,12 @@ class LiveStreamingServiceTest {
 	}
 
 	@Test
-	void endStreamDoesNotReleaseWhenTheStreamWasNotActuallyLive() {
+	void endStreamDoesNotReleaseWhenTheStreamWasNeitherLiveNorStarting() {
 		Stream stream = new Stream(owner, "My Broadcast");
 		ReflectionTestUtils.setField(stream, "id", 1L);
 		when(streamRepository.findById(1L)).thenReturn(Optional.of(stream));
-		when(statusTransitions.markEndingRequested(1L)).thenReturn(false);
+		when(statusTransitions.markEndingRequested(1L, StreamStatus.LIVE)).thenReturn(false);
+		when(statusTransitions.markEndingRequested(1L, StreamStatus.STARTING)).thenReturn(false);
 
 		service.endStream(owner, 1L);
 
@@ -129,7 +175,8 @@ class LiveStreamingServiceTest {
 		assertThatThrownBy(() -> service.endStream(someoneElse, 1L))
 				.isInstanceOf(AccessDeniedException.class);
 
-		verify(statusTransitions, never()).markEndingRequested(any());
+		verify(statusTransitions, never()).markEndingRequested(any(), any());
+		verify(statusTransitions, never()).markEnded(any());
 		verify(liveChannelPool, never()).release(any());
 	}
 

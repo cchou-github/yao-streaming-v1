@@ -74,3 +74,46 @@ resource "awscc_mediapackagev2_origin_endpoint" "pool" {
     }
   ]
 }
+
+# The read-side mirror of awscc_mediapackagev2_channel_policy above - an
+# origin endpoint has no read access at all by default, confirmed live
+# (every request 403'd with a genuine MediaPackage AccessDeniedException,
+# once cloudfront.tf's ordered_cache_behavior bug that had been routing
+# these requests to the wrong origin entirely was separately fixed).
+#
+# Principal = "*", not scoped to CloudFront: unlike the S3 origin below,
+# this origin is a plain custom_origin_config (no OAC-equivalent SigV4
+# identity CloudFront can present to MediaPackage), so there's no IAM
+# principal to scope this to. The real access control is still CloudFront's
+# signed-cookie check on the live/pool-*/* behavior - same trust model this
+# project already accepts for MediaLive's 0.0.0.0/0 RTMP input security
+# group: secrecy of the URL path, not this policy, is what's actually
+# gating access before a viewer even gets this far.
+#
+# Anyone who discovers this egress domain can bypass CloudFront's cookie
+# check entirely and read segments directly, which the S3+OAC path doesn't
+# allow - MediaPackage v2's CDN Authorization feature (a shared-secret
+# header CloudFront would attach and this policy could require) closes
+# that gap but adds real scope; left as a deferred hardening item rather
+# than solved here.
+resource "awscc_mediapackagev2_origin_endpoint_policy" "pool" {
+  count = var.live_channel_pool_size
+
+  channel_group_name   = awscc_mediapackagev2_channel_group.pool.channel_group_name
+  channel_name         = awscc_mediapackagev2_channel.pool[count.index].channel_name
+  origin_endpoint_name = awscc_mediapackagev2_origin_endpoint.pool[count.index].origin_endpoint_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Id      = "AllowPublicReadForCloudFrontEgress"
+    Statement = [
+      {
+        Sid       = "AllowGetForPlayback"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = ["mediapackagev2:GetObject", "mediapackagev2:GetHeadObject"]
+        Resource  = awscc_mediapackagev2_origin_endpoint.pool[count.index].arn
+      }
+    ]
+  })
+}

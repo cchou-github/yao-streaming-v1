@@ -38,17 +38,22 @@ public class StreamStatusTransitions {
 	}
 
 	/**
-	 * {@code LIVE -> ENDING}, the "End Stream" button's own write - see
-	 * {@link LiveStreamingService#endStream}. Ending a stream that isn't
-	 * {@code LIVE} (already ending, already ended, or still just
-	 * {@code STARTING}) is deliberately a no-op rather than an error - v1
-	 * only supports ending from {@code LIVE}.
+	 * {@code from -> ENDING}, the "End Stream" button's own write - see
+	 * {@link LiveStreamingService#endStream}, which tries both {@code LIVE}
+	 * and {@code STARTING} as {@code from}. A stream stuck in {@code
+	 * STARTING} (never got as far as a {@code RUNNING} confirmation) still
+	 * holds a real, running MediaLive channel - confirmed live, the hard
+	 * way, when an early version of this button silently no-op'd for
+	 * exactly that case and left the channel running uncontrolled. Ending a
+	 * stream that's in neither status is still a no-op, not an error -
+	 * already ending, already ended, or {@code PENDING} (never claimed a
+	 * channel, nothing to release).
 	 *
 	 * @return true if this call is the one that moved the row
 	 */
 	@Transactional
-	public boolean markEndingRequested(Long streamId) {
-		return streamRepository.changeStatus(streamId, StreamStatus.LIVE, StreamStatus.ENDING) == 1;
+	public boolean markEndingRequested(Long streamId, StreamStatus from) {
+		return streamRepository.changeStatus(streamId, from, StreamStatus.ENDING) == 1;
 	}
 
 	/**
@@ -72,6 +77,19 @@ public class StreamStatusTransitions {
 	@Transactional
 	public void markFailed(Long streamId) {
 		streamRepository.changeStatus(streamId, StreamStatus.STARTING, StreamStatus.FAILED);
+	}
+
+	/**
+	 * Wraps {@link StreamRepository#claimChannel}. {@link MediaLiveChannelPool#reserve}
+	 * originally called it directly on the repository - confirmed live against
+	 * real AWS to throw {@code jakarta.persistence.TransactionRequiredException}
+	 * ("No active transaction for update or delete query"), the same class of
+	 * bug every other {@code @Modifying} query on {@link StreamRepository} is
+	 * already routed around a {@code @Transactional} bean method to avoid.
+	 */
+	@Transactional
+	public int claimChannel(Long streamId, String channelId, String originSlug) {
+		return streamRepository.claimChannel(streamId, channelId, originSlug);
 	}
 
 }

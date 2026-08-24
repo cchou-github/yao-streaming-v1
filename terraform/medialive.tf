@@ -58,8 +58,12 @@ resource "aws_medialive_input_security_group" "rtmp_public" {
 }
 
 # One RTMP_PUSH input per pool slot - this is the ingest endpoint OBS
-# points at. `stream_name` is the only writable part of `destinations`;
-# the actual generated URL only comes back via the data source below.
+# points at. `stream_name` here (and hence the ingest URL Terraform would
+# read back) is only ever the value at *creation* time - LiveChannelPool
+# overwrites it via UpdateInput on every claim (a fresh random secret, not
+# this static "pool-N" placeholder), so the real, current ingest URL for
+# any given claim only ever exists at runtime, in the app's own UpdateInput
+# response - not something Terraform can meaningfully output or track.
 resource "aws_medialive_input" "pool" {
   count = var.live_channel_pool_size
 
@@ -70,18 +74,15 @@ resource "aws_medialive_input" "pool" {
   destinations {
     stream_name = "pool-${count.index}"
   }
-}
 
-# aws_medialive_input's `destinations` argument is write-only (stream_name
-# in, nothing back) - the generated ingest URL is only readable through
-# this separate data source, keyed by the resource's own id. Verified
-# against AWS docs: an RTMP_PUSH input's destination URL is fixed for the
-# life of the input (stable across restarts/attach-detach), so this is
-# safe to treat as a stable value, not something that churns on every
-# apply.
-data "aws_medialive_input" "pool" {
-  count = var.live_channel_pool_size
-  id    = aws_medialive_input.pool[count.index].id
+  # UpdateInput (called at claim time - see LiveChannelPool.reserve) changes
+  # this same field out from under Terraform's own state. Ignored here so
+  # a routine `terraform plan` doesn't propose "fixing" it back to
+  # "pool-N" and undoing whatever the currently-active claim (if any) set
+  # it to.
+  lifecycle {
+    ignore_changes = [destinations]
+  }
 }
 
 # --- The channel itself: AWS::MediaLive::Channel via CloudFormation ---

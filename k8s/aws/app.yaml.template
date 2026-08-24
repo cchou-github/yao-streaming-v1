@@ -11,17 +11,20 @@
 #
 # Most values (bucket names, IRSA role ARN, ECR image URL) are
 # deterministic and stay correct across a `terraform destroy` + `apply`
-# cycle, and are baked into this template directly. DB_HOST is the
-# exception - a new RDS instance gets a new AWS-assigned endpoint even
-# with the same identifier - and stays as the obviously-fake
-# `pending-terraform-apply...` placeholder below; deploy.sh patches it on
-# every run.
+# cycle, and are baked into this template directly. DB_HOST and
+# CLOUDFRONT_DOMAIN_NAME/KEY_PAIR_ID are the exceptions - a new RDS
+# instance gets a new AWS-assigned endpoint even with the same identifier,
+# and a new distribution gets a new domain and key pair - and stay as the
+# obviously-fake `pending-terraform-apply...` placeholders below;
+# deploy.sh patches all three on every run.
 #
 # NOT included here: the app-secret Secret. Unlike the kind manifests,
-# DB_PASSWORD here is a real, live RDS master password - it must never be
-# baked into a committed file. Create it imperatively instead:
+# DB_PASSWORD and CLOUDFRONT_PRIVATE_KEY here are real, live secrets (an
+# RDS master password and a CloudFront cookie-signing key) - neither must
+# ever be baked into a committed file. Create it imperatively instead:
 #   kubectl create secret generic app-secret \
-#     --from-literal=DB_PASSWORD="$(terraform output -raw rds_master_password)"
+#     --from-literal=DB_PASSWORD="$(terraform output -raw rds_master_password)" \
+#     --from-literal=CLOUDFRONT_PRIVATE_KEY="$(terraform output -raw cloudfront_playback_private_key_pem)"
 # (run from terraform/, before applying this file - the Deployment below
 # references app-secret via secretRef and expects it to already exist.
 # k8s/aws/deploy.sh already does this for you on every run.)
@@ -42,12 +45,20 @@ data:
   # S3Config.java: unset means the SDK talks to real AWS S3 directly,
   # rather than a LocalStack override.
   # LocalUploadWatcher (the local ffmpeg-polling pipeline) must stay off
-  # here - there's no real transcode pipeline wired up against AWS yet, but
-  # running the local watcher against a real S3 bucket would still be the
-  # wrong thing to do once one exists (see LocalUploadWatcher.java's
-  # javadoc), so it's off from the start rather than flipped off later.
+  # here - it races the real S3-triggered Lambda/MediaConvert pipeline for
+  # every upload and reliably wins (local DB polling is much faster than a
+  # real MediaConvert job), claiming and failing videos before MediaConvert
+  # ever finishes. See LocalUploadWatcher.java's javadoc.
   TRANSCODE_WATCHER_ENABLED: "false"
-  CLOUDFRONT_ENABLED: "false"
+  # CLOUDFRONT_DOMAIN_NAME/KEY_PAIR_ID come from `terraform output`, same as
+  # everything else here, but - unlike the bucket names/IRSA ARN - neither
+  # is stable across a destroy+apply cycle: a new distribution gets a new
+  # domain and a new key pair. deploy.sh patches both here on every run,
+  # the same way it already patches DB_HOST - the values below are only
+  # ever placeholders, never meant to stay committed as real values.
+  CLOUDFRONT_ENABLED: "true"
+  CLOUDFRONT_DOMAIN_NAME: pending-terraform-apply.cloudfront.net
+  CLOUDFRONT_KEY_PAIR_ID: pending-terraform-apply
 
 ---
 # IRSA: replaces the kind manifests' static AWS_ACCESS_KEY_ID/

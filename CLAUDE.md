@@ -9,27 +9,23 @@ This file is git-tracked on purpose — unlike Claude's private per-machine
 memory, it travels with the repo to any clone, on any machine. Keep it
 updated as the project's actual state, not as a historical log; PR
 descriptions and commit messages are where the "why we did X" narrative and
-history belong.
+history belong (this project writes unusually detailed ones — `gh pr list`
+and `gh pr view <n>` are worth reading before assuming something isn't
+explained).
 
 ## Constraints worth knowing
 
 Cost-conscious by design: infra is meant to be destroyed and rebuilt freely
 between sessions (`terraform destroy`, then `terraform apply` +
-`k8s/aws/deploy.sh` next time). Don't assume standing infra exists — check
-before relying on it. `terraform apply`/`destroy` are real-money, manual,
-user-run actions; Claude writes the `.tf` files but doesn't run `apply`
-unprompted.
+`k8s/aws/deploy.sh` next time — see `docs/guide/deployment.md`'s "Rebuilding
+from scratch"). Don't assume standing infra exists — check before relying on
+it. `terraform apply`/`destroy` are real-money, manual, user-run actions;
+Claude writes the `.tf` files but doesn't run `apply` unprompted.
 
 ## Current status
 
-- **Foundations**: local dev (Docker Compose + LocalStack), session-backed
-  authentication (MySQL-persisted sessions, not per-pod memory), and the
-  foundational AWS infrastructure (VPC, EKS, RDS, S3, ECR, a public ALB)
-  are done.
-- **VOD**: upload via presigned S3 URL, both transcode paths (an in-process
-  `ffmpeg` pipeline for local dev, and a Lambda submit → MediaConvert →
-  EventBridge → Lambda complete → internal-ALB callback pipeline for real
-  AWS), and CloudFront + signed-cookie playback are done.
+- **VOD** (upload via presigned S3 URL, transcode via Lambda + MediaConvert,
+  catalog/watch, CloudFront + signed-cookie playback): done.
 - **RTMP live streaming** (OBS/any RTMP encoder → a fixed pool of MediaLive
   channels → MediaPackage v2, async EventBridge/Lambda confirmation,
   CloudFront routing, unified live catalog/watch UI): done.
@@ -54,6 +50,8 @@ unprompted.
   works, just isn't documented as one); a reconciliation sweep for videos
   stuck in `UPLOADING`; locking the ALB down to CloudFront-only traffic; a
   custom domain/ACM certificate; live-to-VOD archival after a stream ends.
+  See `docs/guide/future-improvements.md` for the full list, including
+  known security/architecture tradeoffs worth revisiting.
 
 Check `gh pr list --state open` at the start of a session — open PRs are the
 most current source of "what's in flight."
@@ -75,6 +73,10 @@ records status — it never touches video bytes. Video bytes flow directly
 between the browser, S3, MediaConvert/MediaLive/MediaPackage v2/AWS IVS, and
 CloudFront. This holds for VOD and both live-streaming paths alike.
 
+See `docs/guide/` (start at the root `README.md`) for the full diagrammed
+version: an entity-relationship diagram, per-feature flow diagrams, the AWS
+infrastructure layout, and deployment instructions.
+
 ## Resuming on another machine
 
 Everything git-tracked (code, both PR history and open PRs, this file)
@@ -84,16 +86,22 @@ travels with a clone. A few things don't and need redoing:
    open` for what's currently in flight.
 2. Read this file's "Current status" section first - it's kept up to date
    specifically so a fresh session (human or Claude) on a new machine isn't
-   starting blind.
-3. Set up the Prerequisites in `README.md` (Docker + Docker Compose) and
-   confirm `docker compose up -d` works.
+   starting blind. Claude's own private memory/plan state is per-machine and
+   does **not** reliably transfer; this file, commit messages, and PR
+   descriptions are the portable substitute (this project writes unusually
+   detailed ones on purpose).
+3. Set up the Prerequisites in `docs/guide/local-development.md` (Docker +
+   Docker Compose) and confirm `docker compose up -d` works.
 4. Configure AWS credentials on the new machine (`aws configure` or SSO,
    whichever you use) and `gh auth login` if you'll be using the `gh` CLI.
 5. If resuming infra work: `cd terraform && terraform init`. The state file
    (`terraform.tfstate`) is deliberately gitignored (holds the RDS password
    in plaintext) and never transfers between machines - but since this
    project is meant to be destroyed between sessions anyway, that's usually
-   fine to start fresh rather than needing to manually copy it over.
+   fine to start fresh rather than needing to manually copy it over. If
+   infra is genuinely still standing and you need the *same* state, you'll
+   need to copy `terraform.tfstate`/`.tfstate.backup` over yourself through
+   a secure channel - never via git.
 
 ## Where things actually live
 
@@ -106,7 +114,14 @@ travels with a clone. A few things don't and need redoing:
   something is arbitrary).
 - `k8s/` vs `k8s/aws/` — local `kind`-cluster manifests vs. the real-AWS
   deployment manifest, deliberately separate rather than templated (see
-  `k8s/aws/app.yaml.template`'s own header comment for why).
+  `k8s/aws/app.yaml.template`'s own header comment for why). The
+  `.template` file is committed and holds placeholders; `deploy.sh`
+  generates the actual `k8s/aws/app.yaml` (gitignored) from it on every
+  run and patches in live `terraform output` values, so nothing real
+  ever needs to be committed.
+- `docs/guide/` — the reader-facing app guide (architecture, data model,
+  per-feature flows, deployment). See README.md for concrete commands
+  (local dev, tests, deployment).
 - `.claude/skills/` — project-specific Claude Code skills (`deploy`,
   `verify-live-streaming`) encoding this project's own established
   workflows, on top of whatever generic AWS/Terraform skills are already

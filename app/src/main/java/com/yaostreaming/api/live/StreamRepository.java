@@ -1,12 +1,25 @@
 package com.yaostreaming.api.live;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface StreamRepository extends JpaRepository<Stream, Long> {
+
+	/**
+	 * Backs the internal live-state callback: given a channel ARN off a
+	 * MediaLive EventBridge event, finds whichever stream currently has it
+	 * bound. Scoped to the active statuses on purpose - a channel gets
+	 * reused across many streams over time (see {@link #claimChannel}'s own
+	 * javadoc), so without this filter an old {@code ENDED} row could match
+	 * instead of the one actually in flight right now. {@code claimChannel}'s
+	 * own guard is what keeps at most one row ever matching this at a time.
+	 */
+	Optional<Stream> findByChannelIdAndStatusIn(String channelId, List<StreamStatus> statuses);
 
 	/**
 	 * Moves a row between statuses only if it is still in {@code from},

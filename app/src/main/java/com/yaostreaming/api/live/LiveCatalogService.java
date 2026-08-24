@@ -47,7 +47,8 @@ public class LiveCatalogService {
 				stream.getId(),
 				stream.getTitle(),
 				stream.getUser().getDisplayName(),
-				stream.getStartedAt());
+				stream.getStartedAt(),
+				stream.getIngestMode());
 	}
 
 	private LiveStreamDetail toDetail(Stream stream) {
@@ -63,18 +64,22 @@ public class LiveCatalogService {
 				stream.getOriginSlug(),
 				playbackUrl,
 				stream.getUser().getDisplayName(),
-				stream.getStartedAt());
+				stream.getStartedAt(),
+				stream.getIngestMode());
 	}
 
 	/**
 	 * Unlike {@code VideoCatalogService.playbackUrlFor}, no presigned-URL
-	 * fallback for when CloudFront is disabled: MediaPackage/MediaLive have no
-	 * LocalStack equivalent, so there is no local playback path to fall back
-	 * to at all - {@code toDetail} only calls this once it already knows
-	 * CloudFront is enabled.
+	 * fallback for when CloudFront is disabled: MediaPackage/MediaLive/IVS
+	 * have no LocalStack equivalent, so there is no local playback path to
+	 * fall back to at all - {@code toDetail} only calls this once it already
+	 * knows CloudFront is enabled. Path prefix comes from
+	 * {@link IngestMode#cloudFrontPathPrefix()} - {@code live/} routes to
+	 * MediaPackage, {@code live-webrtc/} to IVS (see cloudfront.tf).
 	 */
 	private String playbackUrlFor(Stream stream) {
-		return "https://" + cloudFrontProperties.domainName() + "/live/" + stream.getOriginSlug() + "/master.m3u8";
+		return "https://" + cloudFrontProperties.domainName() + "/" + stream.getIngestMode().cloudFrontPathPrefix()
+				+ "/" + stream.getOriginSlug() + "/master.m3u8";
 	}
 
 }

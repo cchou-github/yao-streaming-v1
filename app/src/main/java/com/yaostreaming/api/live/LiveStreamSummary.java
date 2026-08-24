@@ -8,10 +8,15 @@ import java.time.Instant;
  * VideoSummary}, no {@code isPlayable()} - the catalog only ever lists
  * {@code LIVE} streams to begin with, so every row is playable by
  * construction.
+ *
+ * @param ingestMode purely cosmetic - lets {@code catalog.html} show a
+ *                    small OBS/Browser badge. A viewer never needs this to
+ *                    actually watch; playback works identically either way.
  */
 public record LiveStreamSummary(
 		Long id,
 		String title,
 		String streamerName,
-		Instant startedAt) {
+		Instant startedAt,
+		IngestMode ingestMode) {
 }

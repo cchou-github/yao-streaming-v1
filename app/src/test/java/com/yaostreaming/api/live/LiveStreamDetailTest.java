@@ -9,7 +9,7 @@ class LiveStreamDetailTest {
 
 	private static LiveStreamDetail detail(StreamStatus status, String playbackUrl) {
 		return new LiveStreamDetail(1L, "Ranked queue", null, status, "pool-0", playbackUrl, "Streamer",
-				Instant.EPOCH);
+				Instant.EPOCH, IngestMode.RTMP);
 	}
 
 	@Test

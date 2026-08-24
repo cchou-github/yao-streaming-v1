@@ -18,9 +18,9 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 }
 
 locals {
-  # Holds three handler classes now (submit/complete/live-state-change), not
-  # two - named for the module, not just the transcode pipeline that used to
-  # be its only tenant.
+  # Holds four handler classes now (submit/complete/live-state-change/
+  # ivs-state-change), not two - named for the module, not just the
+  # transcode pipeline that used to be its only tenant.
   lambdas_jar = "${path.module}/../lambda/build/libs/transcode-lambdas-0.0.1-SNAPSHOT.jar"
   # MediaConvert's built-in queue every account has - no custom
   # aws_mediaconvert_queue resource needed at this scale.
@@ -290,4 +290,70 @@ resource "aws_lambda_permission" "allow_eventbridge_invoke_live_state_change" {
   function_name = aws_lambda_function.live_state_change.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.medialive_channel_state_change.arn
+}
+
+# --- IVS state change Lambda: EventBridge (IVS Stream State Change) -> callback ---
+#
+# The browser/WebRTC go-live path's counterpart to live_state_change above -
+# a separate Lambda function rather than one handler branching on
+# event.source, since IVS's event shape genuinely differs from MediaLive's
+# (see IvsStateChangeHandler's own javadoc). Reuses aws_iam_role.lambda_complete
+# and aws_security_group.lambda_complete for the exact same reason
+# live_state_change already does - same trust boundary, same one outbound
+# call to the same internal ALB. Same consequence too: internal-alb.tf,
+# alb.tf's block_internal rule, and SecurityConfig.java all need zero
+# changes - already covered by the existing /internal/* wildcard.
+
+resource "aws_lambda_function" "ivs_state_change" {
+  function_name    = "${var.project_name}-ivs-state-change"
+  role             = aws_iam_role.lambda_complete.arn
+  runtime          = "java21"
+  handler          = "com.yaostreaming.lambda.IvsStateChangeHandler"
+  filename         = local.lambdas_jar
+  source_code_hash = filebase64sha256(local.lambdas_jar)
+  timeout          = 30
+  memory_size      = 256
+
+  vpc_config {
+    subnet_ids         = aws_subnet.private[*].id
+    security_group_ids = [aws_security_group.lambda_complete.id]
+  }
+
+  environment {
+    variables = {
+      CALLBACK_URL = "http://${aws_lb.app_internal.dns_name}/internal/live/callback"
+    }
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_complete_vpc]
+}
+
+# detail.event_name filtered to Stream Start/Stream End only, not every
+# "IVS Stream State Change" sub-event (Session Created, Session Ended,
+# Stream Failure, Stream Takeover, Stream Takeover Failure all share this
+# same detail-type) - same "only the outcomes we act on" discipline as
+# medialive_channel_state_change's RUNNING/STOPPED filter above.
+resource "aws_cloudwatch_event_rule" "ivs_stream_state_change" {
+  name = "${var.project_name}-ivs-stream-state-change"
+
+  event_pattern = jsonencode({
+    source      = ["aws.ivs"]
+    detail-type = ["IVS Stream State Change"]
+    detail = {
+      event_name = ["Stream Start", "Stream End"]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "ivs_state_change_lambda" {
+  rule = aws_cloudwatch_event_rule.ivs_stream_state_change.name
+  arn  = aws_lambda_function.ivs_state_change.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_invoke_ivs_state_change" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.ivs_state_change.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.ivs_stream_state_change.arn
 }

@@ -14,6 +14,18 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    # MediaPackage v2's resource hierarchy (ChannelGroup/Channel/
+    # OriginEndpoint) is only natively available here, not in hashicorp/aws
+    # - auto-generated from AWS's Cloud Control API schema. Mixing awscc
+    # with aws in one configuration/state is an officially documented,
+    # HashiCorp-sanctioned pattern ("AWS and AWSCC Terraform providers:
+    # Better together"). See terraform/medialive.tf's own comment for the
+    # one piece (the MediaLive channel itself) neither provider can express
+    # natively, needing a CloudFormation-wrapped resource instead.
+    awscc = {
+      source  = "hashicorp/awscc"
+      version = "~> 1.0"
+    }
   }
 
   # No backend block: state is local on purpose. terraform/terraform.tfstate
@@ -31,6 +43,10 @@ provider "aws" {
       ManagedBy   = "terraform"
     }
   }
+}
+
+provider "awscc" {
+  region = var.aws_region
 }
 
 locals {

@@ -8,6 +8,17 @@ import org.springframework.data.repository.query.Param;
 public interface StreamRepository extends JpaRepository<Stream, Long> {
 
 	/**
+	 * Moves a row between statuses only if it is still in {@code from},
+	 * returning the number of rows changed. Mirrors
+	 * {@code VideoRepository.changeStatus} exactly - used by
+	 * {@code StreamStatusTransitions} for every transition that isn't
+	 * {@link #claimChannel}'s own compound claim-and-bind.
+	 */
+	@Modifying
+	@Query("update Stream s set s.status = :to where s.id = :id and s.status = :from")
+	int changeStatus(@Param("id") Long id, @Param("from") StreamStatus from, @Param("to") StreamStatus to);
+
+	/**
 	 * Atomically claims {@code channelId} for {@code streamId}, moving the
 	 * stream {@code PENDING -> STARTING}, but only if no other stream
 	 * currently holds that channel (a stream in {@code STARTING}, {@code LIVE},

@@ -92,3 +92,38 @@ output "alb_internal_dns_name" {
   description = "Internal only - not reachable from outside the VPC. Wired into the completion Lambda's CALLBACK_URL env var."
   value       = aws_lb.app_internal.dns_name
 }
+
+output "cloudfront_domain_name" {
+  description = "Processed-video playback origin: https://<this>/videos/{id}/master.m3u8, once the app-side follow-up sets signed cookies."
+  value       = aws_cloudfront_distribution.processed.domain_name
+}
+
+output "cloudfront_key_pair_id" {
+  description = "Paired with cloudfront_playback_private_key_pem below - identifies which public key CloudFront should verify a signed cookie against."
+  value       = aws_cloudfront_public_key.playback.id
+}
+
+output "cloudfront_playback_private_key_pem" {
+  description = "PKCS#8 PEM - the app signs playback cookies with this. Sensitive: never logged, never displayed by a plain `terraform output`."
+  value       = tls_private_key.playback_signing.private_key_pem_pkcs8
+  sensitive   = true
+}
+
+# Pre-joined as comma-separated strings, not raw lists, so deploy.sh can
+# read them with plain `terraform output -raw`, matching every existing
+# output above. Index-correlated across all three: pool slot i's channel
+# ARN, ingest URL, and origin slug are the i-th entry in each.
+output "live_pool_channel_ids" {
+  description = "MediaLive channel ARNs, one per pool slot - what LiveChannelPool passes to Start/Stop/DescribeChannel."
+  value       = join(",", [for s in aws_cloudformation_stack.medialive_channel : s.outputs["ChannelArn"]])
+}
+
+output "live_pool_ingest_urls" {
+  description = "RTMP ingest URLs, one per pool slot - what OBS/an encoder points at once a stream claims that slot."
+  value       = join(",", [for d in data.aws_medialive_input.pool : d.destinations[0].url])
+}
+
+output "live_pool_origin_slugs" {
+  description = "CloudFront path-prefix slugs (pool-0..pool-N-1) - deterministic, not derived from any resource, listed here purely for symmetry/documentation with the other two live_pool_* outputs."
+  value       = join(",", [for i in range(var.live_channel_pool_size) : "pool-${i}"])
+}

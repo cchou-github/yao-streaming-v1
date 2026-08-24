@@ -108,7 +108,7 @@ class MediaLiveChannelPoolTest {
 		Optional<LiveChannelPool.ReservedChannel> reserved = pool.reserve(1L);
 
 		assertThat(reserved).contains(
-				new LiveChannelPool.ReservedChannel("channel-0", "pool-0", "rtmp://host/fresh-secret-0"));
+				LiveChannelPool.ReservedChannel.rtmp("channel-0", "pool-0", "rtmp://host/fresh-secret-0"));
 		verify(mediaLiveClient).startChannel(StartChannelRequest.builder().channelId("channel-0").build());
 
 		ArgumentCaptor<UpdateInputRequest> captor = ArgumentCaptor.forClass(UpdateInputRequest.class);
@@ -156,7 +156,7 @@ class MediaLiveChannelPoolTest {
 		Optional<LiveChannelPool.ReservedChannel> reserved = pool.reserve(1L);
 
 		assertThat(reserved).contains(
-				new LiveChannelPool.ReservedChannel("channel-1", "pool-1", "rtmp://host/fresh-secret-1"));
+				LiveChannelPool.ReservedChannel.rtmp("channel-1", "pool-1", "rtmp://host/fresh-secret-1"));
 		verify(mediaLiveClient, never()).startChannel(StartChannelRequest.builder().channelId("channel-0").build());
 
 		ArgumentCaptor<UpdateInputRequest> captor = ArgumentCaptor.forClass(UpdateInputRequest.class);
@@ -209,7 +209,7 @@ class MediaLiveChannelPoolTest {
 		Optional<LiveChannelPool.ReservedChannel> reserved = pool.reserve(1L);
 
 		assertThat(reserved).contains(
-				new LiveChannelPool.ReservedChannel("channel-1", "pool-1", "rtmp://host/fresh-secret-1"));
+				LiveChannelPool.ReservedChannel.rtmp("channel-1", "pool-1", "rtmp://host/fresh-secret-1"));
 		verify(statusTransitions, never()).claimChannel(1L, "channel-0", "pool-0");
 	}
 

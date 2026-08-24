@@ -93,4 +93,10 @@ public class StreamStatusTransitions {
 		return streamRepository.claimChannel(streamId, channelId, originSlug);
 	}
 
+	/** Wraps {@link StreamRepository#recordIngestSecretArn} for the same reason {@link #claimChannel} does. */
+	@Transactional
+	public void recordIngestSecretArn(Long streamId, String ingestSecretArn) {
+		streamRepository.recordIngestSecretArn(streamId, ingestSecretArn);
+	}
+
 }

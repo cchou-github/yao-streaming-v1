@@ -55,7 +55,7 @@ class LiveStreamingServiceTest {
 	@Test
 	void goLiveSavesAPendingStreamAndReturnsTheReservedIngestUrl() {
 		when(liveChannelPool.reserve(42L)).thenReturn(
-				Optional.of(new LiveChannelPool.ReservedChannel("channel-0", "pool-0", "rtmp://ingest-0")));
+				Optional.of(LiveChannelPool.ReservedChannel.rtmp("channel-0", "pool-0", "rtmp://ingest-0")));
 
 		GoLiveResponse response = service.goLive(owner, new GoLiveRequest("My Broadcast", "Playing games"));
 
@@ -90,7 +90,7 @@ class LiveStreamingServiceTest {
 	@Test
 	void goLiveLeavesDescriptionUnsetWhenBlank() {
 		when(liveChannelPool.reserve(any())).thenReturn(
-				Optional.of(new LiveChannelPool.ReservedChannel("channel-0", "pool-0", "rtmp://ingest-0")));
+				Optional.of(LiveChannelPool.ReservedChannel.rtmp("channel-0", "pool-0", "rtmp://ingest-0")));
 
 		service.goLive(owner, new GoLiveRequest("My Broadcast", "   "));
 

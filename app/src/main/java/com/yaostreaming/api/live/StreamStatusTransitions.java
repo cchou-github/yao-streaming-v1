@@ -1,5 +1,6 @@
 package com.yaostreaming.api.live;
 
+import com.yaostreaming.api.live.rtmp.MediaLiveChannelPool;
 import java.time.Instant;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;

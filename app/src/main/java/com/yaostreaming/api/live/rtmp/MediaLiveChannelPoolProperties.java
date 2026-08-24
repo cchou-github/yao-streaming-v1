@@ -1,4 +1,4 @@
-package com.yaostreaming.api.live;
+package com.yaostreaming.api.live.rtmp;
 
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -42,7 +42,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          {@code poolOriginSlugs} already is.
  */
 @ConfigurationProperties(prefix = "app.live")
-public record LiveChannelPoolProperties(
+public record MediaLiveChannelPoolProperties(
 		boolean enabled,
 		List<String> poolChannelIds,
 		List<String> poolInputIds,

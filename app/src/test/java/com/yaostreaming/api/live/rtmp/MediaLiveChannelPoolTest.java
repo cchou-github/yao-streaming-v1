@@ -1,4 +1,4 @@
-package com.yaostreaming.api.live;
+package com.yaostreaming.api.live.rtmp;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -9,6 +9,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.yaostreaming.api.live.LiveChannelPool;
+import com.yaostreaming.api.live.Stream;
+import com.yaostreaming.api.live.StreamRepository;
+import com.yaostreaming.api.live.StreamStatusTransitions;
 import com.yaostreaming.api.user.User;
 import java.util.List;
 import java.util.Optional;
@@ -39,7 +43,7 @@ import software.amazon.awssdk.services.mediapackagev2.model.ResetOriginEndpointS
 @MockitoSettings(strictness = Strictness.LENIENT)
 class MediaLiveChannelPoolTest {
 
-	private static final LiveChannelPoolProperties TWO_SLOT_POOL = new LiveChannelPoolProperties(
+	private static final MediaLiveChannelPoolProperties TWO_SLOT_POOL = new MediaLiveChannelPoolProperties(
 			true,
 			List.of("channel-0", "channel-1"),
 			List.of("input-0", "input-1"),
@@ -85,7 +89,7 @@ class MediaLiveChannelPoolTest {
 
 	@Test
 	void constructorRejectsMismatchedListLengths() {
-		LiveChannelPoolProperties mismatched = new LiveChannelPoolProperties(
+		MediaLiveChannelPoolProperties mismatched = new MediaLiveChannelPoolProperties(
 				true, List.of("channel-0", "channel-1"), List.of("input-0"), List.of("pool-0", "pool-1"),
 				"channel-group");
 
@@ -222,7 +226,7 @@ class MediaLiveChannelPoolTest {
 
 	@Test
 	void reserveStripsTheArnDownToTheBareIdBeforeCallingStartChannel() {
-		LiveChannelPoolProperties arnPool = new LiveChannelPoolProperties(
+		MediaLiveChannelPoolProperties arnPool = new MediaLiveChannelPoolProperties(
 				true,
 				List.of("arn:aws:medialive:ap-northeast-1:720289141862:channel:4356937"),
 				List.of("input-0"),

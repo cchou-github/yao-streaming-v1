@@ -1,4 +1,4 @@
-package com.yaostreaming.api.live;
+package com.yaostreaming.api.live.rtmp;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,7 +18,7 @@ import software.amazon.awssdk.services.mediapackagev2.MediaPackageV2Client;
  * {@code app.live.region} property duplicating {@code app.storage.region}.
  */
 @Configuration
-public class LiveConfig {
+public class MediaLiveConfig {
 
 	@Bean
 	MediaLiveClient mediaLiveClient() {

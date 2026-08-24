@@ -1,5 +1,9 @@
-package com.yaostreaming.api.live;
+package com.yaostreaming.api.live.rtmp;
 
+import com.yaostreaming.api.live.LiveChannelPool;
+import com.yaostreaming.api.live.Stream;
+import com.yaostreaming.api.live.StreamRepository;
+import com.yaostreaming.api.live.StreamStatusTransitions;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.List;
@@ -20,7 +24,7 @@ import software.amazon.awssdk.services.mediapackagev2.model.ResetOriginEndpointS
 /**
  * The fixed-pool {@link LiveChannelPool} implementation: reads the 5 static
  * candidate channels straight from Terraform-sourced config
- * ({@link LiveChannelPoolProperties}) and never calls
+ * ({@link MediaLiveChannelPoolProperties}) and never calls
  * {@code CreateChannel}/{@code DeleteChannel} - only
  * {@code Start}/{@code Stop}, matching the narrow IAM policy
  * {@code terraform/iam.tf} grants {@code app_irsa}.
@@ -32,12 +36,12 @@ public class MediaLiveChannelPool implements LiveChannelPool {
 	private final StreamStatusTransitions statusTransitions;
 	private final MediaLiveClient mediaLiveClient;
 	private final MediaPackageV2Client mediaPackageV2Client;
-	private final LiveChannelPoolProperties properties;
+	private final MediaLiveChannelPoolProperties properties;
 	private final SecureRandom secureRandom = new SecureRandom();
 
 	public MediaLiveChannelPool(StreamRepository streamRepository, StreamStatusTransitions statusTransitions,
 			MediaLiveClient mediaLiveClient, MediaPackageV2Client mediaPackageV2Client,
-			LiveChannelPoolProperties properties) {
+			MediaLiveChannelPoolProperties properties) {
 		int size = properties.poolChannelIds().size();
 		if (properties.poolInputIds().size() != size || properties.poolOriginSlugs().size() != size) {
 			throw new IllegalStateException(

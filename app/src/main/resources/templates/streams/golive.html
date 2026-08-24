@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/layout :: pageHead}"></th:block>
+    <title>Go live</title>
+    <!-- Session auth means POSTs need a CSRF token; JS reads it from here. -->
+    <meta name="_csrf" th:content="${_csrf.token}">
+    <meta name="_csrf_header" th:content="${_csrf.headerName}">
+    <style>
+        form { max-width: 32rem; margin-top: 1.5rem; }
+        label { display: block; margin-top: 1rem; font-weight: 600; }
+        input, textarea, button { width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }
+        button { margin-top: 1.5rem; cursor: pointer; }
+        #result {
+            max-width: 32rem;
+            margin-top: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--rule);
+            border-radius: .5rem;
+            padding: 1.1rem 1.25rem;
+        }
+        #result code {
+            display: block;
+            word-break: break-all;
+            background: var(--ground);
+            border: 1px solid var(--rule);
+            border-radius: .3rem;
+            padding: .5rem .6rem;
+            margin-top: .35rem;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: .85rem;
+        }
+        .error { color: var(--failed); margin-top: 1rem; }
+        #active-stream {
+            max-width: 32rem;
+            margin-top: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--rule);
+            border-radius: .5rem;
+            padding: 1.1rem 1.25rem;
+        }
+        #active-stream .facts { display: flex; align-items: center; gap: .6rem; margin-top: .25rem; }
+    </style>
+</head>
+<body>
+<th:block th:replace="~{fragments/layout :: nav}"></th:block>
+
+<main>
+    <h1>Go live</h1>
+
+    <!-- Already have a channel-bound stream (STARTING/LIVE/ENDING): show it
+         instead of the form - mirrors LiveStreamingService.goLive's own
+         one-stream-per-user rule, and is reachable from a fresh page load,
+         not just right after submitting the form below. -->
+    <div id="active-stream" th:if="${activeStream}">
+        <p><strong>You already have a stream in progress.</strong></p>
+        <p class="facts">
+            <span class="badge" th:classappend="${activeStream.status}" th:text="${activeStream.status}">LIVE</span>
+            <span th:text="${activeStream.title}">Title</span>
+        </p>
+        <p class="muted" style="margin-top:.5rem" th:text="${activeStream.statusMessage()}">Status message</p>
+        <p th:if="${activeStream.status.name() == 'LIVE'}" style="margin-top:.5rem">
+            <a th:href="@{/streams/{id}(id=${activeStream.id})}">Watch it</a>
+        </p>
+        <button type="button" id="end-active-stream" th:attr="data-stream-id=${activeStream.id}"
+                style="margin-top:1rem">End stream</button>
+        <div id="active-status" class="error" hidden></div>
+    </div>
+
+    <th:block th:unless="${activeStream}">
+        <p class="muted">Fill this in, then point your encoder (e.g. OBS) at the ingest URL you get back.</p>
+
+        <form id="golive-form">
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" maxlength="255" required>
+
+            <label for="description">Description (optional)</label>
+            <textarea id="description" name="description" rows="3" maxlength="2000"></textarea>
+
+            <button type="submit" id="submit">Go live</button>
+        </form>
+
+        <div id="status" class="error" hidden></div>
+
+        <div id="result" hidden>
+            <p><strong>You're set.</strong> In OBS: Settings → Stream → Server = the URL below (Service: Custom).</p>
+            <p>Ingest URL<code id="ingest-url"></code></p>
+            <p class="muted" style="margin-top:.75rem">
+                Status starts at <code>STARTING</code> - once MediaLive confirms the channel is
+                actually running, this stream shows up on <a th:href="@{/streams}">the live catalog</a>.
+            </p>
+            <button type="button" id="end-stream" style="margin-top:1rem">End stream</button>
+        </div>
+    </th:block>
+</main>
+
+<script>
+    const csrfToken = document.querySelector('meta[name="_csrf"]').content;
+    const csrfHeader = document.querySelector('meta[name="_csrf_header"]').content;
+
+    // Shared by both "End stream" buttons below - the one shown right after
+    // a fresh go-live, and the one shown on page load when this user
+    // already had a stream in progress before the page ever loaded.
+    async function endStream(streamId, button, errorEl) {
+        button.disabled = true;
+        try {
+            const response = await fetch('/api/streams/' + streamId + '/end', {
+                method: 'POST',
+                headers: { [csrfHeader]: csrfToken }
+            });
+            if (!response.ok) {
+                throw new Error('Could not end stream: ' + response.status + ' ' + await response.text());
+            }
+            window.location.href = '/streams';
+        }
+        catch (error) {
+            button.disabled = false;
+            errorEl.textContent = error.message;
+            errorEl.hidden = false;
+        }
+    }
+
+    const activeEndButton = document.getElementById('end-active-stream');
+    if (activeEndButton) {
+        activeEndButton.addEventListener('click', () => endStream(
+                activeEndButton.dataset.streamId, activeEndButton, document.getElementById('active-status')));
+    }
+
+    const form = document.getElementById('golive-form');
+    if (form) {
+        const submit = document.getElementById('submit');
+        const status = document.getElementById('status');
+        const result = document.getElementById('result');
+        const ingestUrlEl = document.getElementById('ingest-url');
+        const endButton = document.getElementById('end-stream');
+
+        function fail(message) {
+            status.textContent = message;
+            status.hidden = false;
+        }
+
+        let currentStreamId = null;
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            submit.disabled = true;
+            status.hidden = true;
+
+            try {
+                const response = await fetch('/api/streams', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', [csrfHeader]: csrfToken },
+                    body: JSON.stringify({
+                        title: document.getElementById('title').value,
+                        description: document.getElementById('description').value
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error('Could not go live: ' + response.status + ' ' + await response.text());
+                }
+                const stream = await response.json();
+                currentStreamId = stream.streamId;
+                ingestUrlEl.textContent = stream.ingestUrl;
+                result.hidden = false;
+                form.hidden = true;
+            }
+            catch (error) {
+                fail(error.message);
+            }
+            finally {
+                submit.disabled = false;
+            }
+        });
+
+        endButton.addEventListener('click', () => {
+            if (currentStreamId !== null) {
+                endStream(currentStreamId, endButton, status);
+            }
+        });
+    }
+</script>
+</body>
+</html>

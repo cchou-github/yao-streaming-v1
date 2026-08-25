@@ -18,6 +18,9 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 }
 
 locals {
+  # Holds three handler classes now (submit/complete/live-state-change), not
+  # two - named for the module, not just the transcode pipeline that used to
+  # be its only tenant.
   lambdas_jar = "${path.module}/../lambda/build/libs/transcode-lambdas-0.0.1-SNAPSHOT.jar"
   # MediaConvert's built-in queue every account has - no custom
   # aws_mediaconvert_queue resource needed at this scale.
@@ -206,4 +209,73 @@ resource "aws_lambda_permission" "allow_eventbridge_invoke_complete" {
   function_name = aws_lambda_function.complete.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.mediaconvert_job_state_change.arn
+}
+
+# --- Live state change Lambda: EventBridge (MediaLive Channel State Change) -> callback ---
+#
+# Reuses aws_iam_role.lambda_complete and aws_security_group.lambda_complete
+# rather than declaring new ones: the trust boundary and required
+# permissions (VPC exec role, outbound-only SG, POST to the same internal
+# ALB) are identical, not just similar - this Lambda makes no AWS API calls
+# of its own either, same as the completion Lambda. Consequence:
+# internal-alb.tf needs no changes (its ingress already allows the shared
+# SG), alb.tf's block_internal rule already covers /internal/live/* (its
+# path_pattern is the /internal/* wildcard, not scoped to
+# /internal/transcode/*), and SecurityConfig.java needs zero changes
+# (permitAll() + the CSRF exemption already cover /internal/**).
+
+resource "aws_lambda_function" "live_state_change" {
+  function_name    = "${var.project_name}-live-state-change"
+  role             = aws_iam_role.lambda_complete.arn
+  runtime          = "java21"
+  handler          = "com.yaostreaming.lambda.LiveStateChangeHandler"
+  filename         = local.lambdas_jar
+  source_code_hash = filebase64sha256(local.lambdas_jar)
+  timeout          = 30
+  memory_size      = 256
+
+  vpc_config {
+    subnet_ids         = aws_subnet.private[*].id
+    security_group_ids = [aws_security_group.lambda_complete.id]
+  }
+
+  environment {
+    variables = {
+      CALLBACK_URL = "http://${aws_lb.app_internal.dns_name}/internal/live/callback"
+    }
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_complete_vpc]
+}
+
+# detail.state filtered to RUNNING/IDLE only, not every ChannelState value -
+# same "only the outcomes we act on" discipline as
+# mediaconvert_job_state_change's COMPLETE/ERROR filter above. Verified
+# against MediaLive's real ChannelState enum (see LiveStateChangeHandler's
+# own javadoc): there is no STOPPED or FAILED value on this event type at
+# all - a stopped channel reports IDLE, and channel-level failure would be
+# a separate "MediaLive Channel Alert" event, out of scope here.
+resource "aws_cloudwatch_event_rule" "medialive_channel_state_change" {
+  name = "${var.project_name}-medialive-channel-state-change"
+
+  event_pattern = jsonencode({
+    source      = ["aws.medialive"]
+    detail-type = ["MediaLive Channel State Change"]
+    detail = {
+      state = ["RUNNING", "IDLE"]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "live_state_change_lambda" {
+  rule = aws_cloudwatch_event_rule.medialive_channel_state_change.name
+  arn  = aws_lambda_function.live_state_change.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_invoke_live_state_change" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.live_state_change.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.medialive_channel_state_change.arn
 }

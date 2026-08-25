@@ -55,7 +55,7 @@ class LiveWatchControllerTest {
 
 	private static LiveStreamDetail live() {
 		return new LiveStreamDetail(7L, "Ranked queue", "Climbing to Diamond", StreamStatus.LIVE, "pool-2",
-				"https://d123.cloudfront.net/live/pool-2/master.m3u8", "Reiko", Instant.EPOCH);
+				"https://d123.cloudfront.net/live/pool-2/master.m3u8", "Reiko", Instant.EPOCH, IngestMode.RTMP);
 	}
 
 	private static User userWithId(long id) {
@@ -68,7 +68,7 @@ class LiveWatchControllerTest {
 	@WithMockUser
 	void catalogListsLiveStreams() throws Exception {
 		when(liveCatalogService.listLive()).thenReturn(List.of(
-				new LiveStreamSummary(1L, "Ranked queue", "Reiko", Instant.EPOCH)));
+				new LiveStreamSummary(1L, "Ranked queue", "Reiko", Instant.EPOCH, IngestMode.RTMP)));
 
 		mockMvc.perform(get("/streams"))
 				.andExpect(status().isOk())
@@ -152,7 +152,8 @@ class LiveWatchControllerTest {
 	@WithMockUser
 	void watchPageShowsStatusInsteadOfAPlayerBeforeGoingLive() throws Exception {
 		when(liveCatalogService.findDetail(8L)).thenReturn(Optional.of(new LiveStreamDetail(
-				8L, "Warming up", null, StreamStatus.STARTING, "pool-1", null, "Reiko", Instant.EPOCH)));
+				8L, "Warming up", null, StreamStatus.STARTING, "pool-1", null, "Reiko", Instant.EPOCH,
+				IngestMode.RTMP)));
 
 		mockMvc.perform(get("/streams/8"))
 				.andExpect(status().isOk())
@@ -191,7 +192,8 @@ class LiveWatchControllerTest {
 	@WithMockUser
 	void watchPageSetsNoCookiesWhenNotYetPlayableEvenIfCloudFrontIsEnabled() throws Exception {
 		when(liveCatalogService.findDetail(8L)).thenReturn(Optional.of(new LiveStreamDetail(
-				8L, "Warming up", null, StreamStatus.STARTING, "pool-1", null, "Reiko", Instant.EPOCH)));
+				8L, "Warming up", null, StreamStatus.STARTING, "pool-1", null, "Reiko", Instant.EPOCH,
+				IngestMode.RTMP)));
 		when(cloudFrontProperties.enabled()).thenReturn(true);
 
 		mockMvc.perform(get("/streams/8"))

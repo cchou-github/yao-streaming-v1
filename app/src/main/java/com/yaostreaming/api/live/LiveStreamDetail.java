@@ -12,6 +12,9 @@ import java.time.Instant;
  * which is fully deterministic from the id alone, a stream's {@code
  * originSlug} is only known at claim time (any of the 5 pool slots), so it
  * has to come from the loaded row rather than being reconstructed.
+ * {@code ingestMode} is exposed for the same reason as {@code originSlug} -
+ * {@code LiveWatchController} needs it to pick {@link IngestMode#cloudFrontPathPrefix()}
+ * when building the cookie's playback key, not just to display it.
  */
 public record LiveStreamDetail(
 		Long id,
@@ -21,7 +24,8 @@ public record LiveStreamDetail(
 		String originSlug,
 		String playbackUrl,
 		String streamerName,
-		Instant startedAt) {
+		Instant startedAt,
+		IngestMode ingestMode) {
 
 	public boolean isPlayable() {
 		return status == StreamStatus.LIVE && playbackUrl != null;

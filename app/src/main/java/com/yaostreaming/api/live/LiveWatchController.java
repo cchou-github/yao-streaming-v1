@@ -62,7 +62,7 @@ public class LiveWatchController {
 		LiveStreamDetail stream = liveCatalogService.findDetail(id)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such stream"));
 		if (cloudFrontProperties.enabled() && stream.isPlayable()) {
-			String playbackKey = "live/" + stream.originSlug() + "/master.m3u8";
+			String playbackKey = stream.ingestMode().cloudFrontPathPrefix() + "/" + stream.originSlug() + "/master.m3u8";
 			cloudFrontCookieSigner.cookiesFor(playbackKey)
 					.forEach(cookie -> response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString()));
 		}

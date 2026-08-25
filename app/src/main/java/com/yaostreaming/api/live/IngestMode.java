@@ -10,5 +10,20 @@ package com.yaostreaming.api.live;
  * one a given stream is bound to.
  */
 public enum IngestMode {
-	RTMP, WEBRTC
+	RTMP, WEBRTC;
+
+	/**
+	 * The CloudFront path prefix a stream's playback URL is built under -
+	 * {@code live/pool-N/...} for RTMP (routes to MediaPackage v2),
+	 * {@code live-webrtc/pool-N/...} for WEBRTC (routes to IVS). Centralized
+	 * here so {@code LiveCatalogService} and {@code LiveWatchController}
+	 * can't drift from each other the way two independent hardcoded
+	 * {@code "live/"} literals would risk.
+	 */
+	public String cloudFrontPathPrefix() {
+		return switch (this) {
+			case RTMP -> "live";
+			case WEBRTC -> "live-webrtc";
+		};
+	}
 }

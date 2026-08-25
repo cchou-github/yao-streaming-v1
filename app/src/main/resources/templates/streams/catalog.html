@@ -32,6 +32,16 @@
             font-size: .82rem;
             color: var(--ink-muted);
         }
+        .card .meta .right {
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+        }
+        .badge.source {
+            background: none;
+            border: 1px solid var(--rule);
+            color: var(--ink-muted);
+        }
         .empty {
             background: var(--surface);
             border: 1px dashed var(--rule);
@@ -60,7 +70,10 @@
 
             <div class="meta">
                 <span th:text="${stream.streamerName}">Streamer</span>
-                <span class="badge LIVE">LIVE</span>
+                <span class="right">
+                    <span class="badge source" th:text="${stream.ingestMode.name() == 'WEBRTC' ? 'Browser' : 'OBS'}">OBS</span>
+                    <span class="badge LIVE">LIVE</span>
+                </span>
             </div>
         </li>
     </ul>

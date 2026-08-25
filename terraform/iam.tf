@@ -74,6 +74,20 @@ data "aws_iam_policy_document" "app_medialive_control" {
       for s in aws_cloudformation_stack.medialive_channel : s.outputs["ChannelArn"]
     ]
   }
+
+  # UpdateInput: rotates each pool slot's RTMP stream_name to a fresh random
+  # secret on every claim (LiveChannelPool.reserve), so the ingest URL
+  # handed back to a viewer is a per-claim secret rather than a static,
+  # permanently-reusable one tied to the slot itself. Confirmed live before
+  # relying on it: UpdateInput works on an input that's still ATTACHED to
+  # its channel (no need to detach first) - see PR description for the
+  # spike. Scoped to inputs, not channels - a distinct resource type/ARN
+  # from the StartChannel/StopChannel statement above.
+  statement {
+    sid       = "RotatePoolInputSecrets"
+    actions   = ["medialive:UpdateInput"]
+    resources = [for i in aws_medialive_input.pool : i.arn]
+  }
 }
 
 resource "aws_iam_policy" "app_medialive_control" {
@@ -84,4 +98,29 @@ resource "aws_iam_policy" "app_medialive_control" {
 resource "aws_iam_role_policy_attachment" "app_irsa_medialive" {
   role       = aws_iam_role.app_irsa.name
   policy_arn = aws_iam_policy.app_medialive_control.arn
+}
+
+# ResetOriginEndpointState: clears a pool slot's leftover MediaPackage
+# content when a stream ends (LiveChannelPool.release), so the next
+# claimant's viewers can never be served a previous, unrelated stream's
+# video from the shared origin endpoint's manifest window. A separate
+# policy/attachment from app_medialive_control above - MediaPackage v2 is a
+# distinct service/ARN namespace from MediaLive, not just a different
+# action on the same resources.
+data "aws_iam_policy_document" "app_mediapackage_control" {
+  statement {
+    sid       = "ResetPoolOriginEndpoints"
+    actions   = ["mediapackagev2:ResetOriginEndpointState"]
+    resources = [for e in awscc_mediapackagev2_origin_endpoint.pool : e.arn]
+  }
+}
+
+resource "aws_iam_policy" "app_mediapackage_control" {
+  name   = "${var.project_name}-app-mediapackage-control"
+  policy = data.aws_iam_policy_document.app_mediapackage_control.json
+}
+
+resource "aws_iam_role_policy_attachment" "app_irsa_mediapackage" {
+  role       = aws_iam_role.app_irsa.name
+  policy_arn = aws_iam_policy.app_mediapackage_control.arn
 }

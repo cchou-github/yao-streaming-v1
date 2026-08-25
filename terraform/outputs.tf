@@ -112,15 +112,15 @@ output "cloudfront_playback_private_key_pem" {
 # Pre-joined as comma-separated strings, not raw lists, so deploy.sh can
 # read them with plain `terraform output -raw`, matching every existing
 # output above. Index-correlated across all three: pool slot i's channel
-# ARN, ingest URL, and origin slug are the i-th entry in each.
+# ARN, input id, and origin slug are the i-th entry in each.
 output "live_pool_channel_ids" {
   description = "MediaLive channel ARNs, one per pool slot - what LiveChannelPool passes to Start/Stop/DescribeChannel."
   value       = join(",", [for s in aws_cloudformation_stack.medialive_channel : s.outputs["ChannelArn"]])
 }
 
-output "live_pool_ingest_urls" {
-  description = "RTMP ingest URLs, one per pool slot - what OBS/an encoder points at once a stream claims that slot."
-  value       = join(",", [for d in data.aws_medialive_input.pool : d.destinations[0].url])
+output "live_pool_input_ids" {
+  description = "MediaLive input ids, one per pool slot - what LiveChannelPool calls UpdateInput on to rotate each claim's ingest secret. Distinct from live_pool_channel_ids: inputs and channels are separate MediaLive resources with separate ARNs/ids."
+  value       = join(",", [for i in aws_medialive_input.pool : i.id])
 }
 
 output "live_pool_origin_slugs" {

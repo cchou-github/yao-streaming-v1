@@ -26,7 +26,7 @@ CLOUDFRONT_DOMAIN=$(terraform -chdir="$TF_DIR" output -raw cloudfront_domain_nam
 CLOUDFRONT_KEY_PAIR_ID=$(terraform -chdir="$TF_DIR" output -raw cloudfront_key_pair_id)
 CLOUDFRONT_PRIVATE_KEY=$(terraform -chdir="$TF_DIR" output -raw cloudfront_playback_private_key_pem)
 LIVE_POOL_CHANNEL_IDS=$(terraform -chdir="$TF_DIR" output -raw live_pool_channel_ids)
-LIVE_POOL_INGEST_URLS=$(terraform -chdir="$TF_DIR" output -raw live_pool_ingest_urls)
+LIVE_POOL_INPUT_IDS=$(terraform -chdir="$TF_DIR" output -raw live_pool_input_ids)
 
 echo "==> Refreshing kubeconfig (cluster may be new since the last apply)"
 aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER" >/dev/null
@@ -52,10 +52,10 @@ echo "    a destroy+apply cycle - a new distribution gets a new domain/key pair)
 sed -i "s|CLOUDFRONT_DOMAIN_NAME:.*|CLOUDFRONT_DOMAIN_NAME: $CLOUDFRONT_DOMAIN|" "$APP_YAML"
 sed -i "s|CLOUDFRONT_KEY_PAIR_ID:.*|CLOUDFRONT_KEY_PAIR_ID: $CLOUDFRONT_KEY_PAIR_ID|" "$APP_YAML"
 
-echo "==> Patching LIVE_POOL_CHANNEL_IDS/INGEST_URLS (also not stable across a"
-echo "    destroy+apply cycle - a new pool gets new channel ARNs/ingest URLs)"
+echo "==> Patching LIVE_POOL_CHANNEL_IDS/INPUT_IDS (also not stable across a"
+echo "    destroy+apply cycle - a new pool gets new channel ARNs/input ids)"
 sed -i "s|LIVE_POOL_CHANNEL_IDS:.*|LIVE_POOL_CHANNEL_IDS: $LIVE_POOL_CHANNEL_IDS|" "$APP_YAML"
-sed -i "s|LIVE_POOL_INGEST_URLS:.*|LIVE_POOL_INGEST_URLS: $LIVE_POOL_INGEST_URLS|" "$APP_YAML"
+sed -i "s|LIVE_POOL_INPUT_IDS:.*|LIVE_POOL_INPUT_IDS: $LIVE_POOL_INPUT_IDS|" "$APP_YAML"
 
 echo "==> Recreating app-secret with the current RDS password + CloudFront signing key"
 kubectl create secret generic app-secret \

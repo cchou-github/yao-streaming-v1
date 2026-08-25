@@ -31,12 +31,29 @@ public class LiveStreamingService {
 	}
 
 	/**
-	 * Creates the {@code PENDING} row, then immediately attempts to reserve a
-	 * channel for it - two separate steps, two separate transactions, not
-	 * one atomic unit (a stream that fails to reserve a channel still exists
-	 * as a row, left {@code PENDING}, harmless to leave behind).
+	 * One live stream per user at a time: rejects outright if the caller
+	 * already has a channel-bound stream, rather than letting a second
+	 * claim through and leaving the caller with two to manage. Checked
+	 * before the {@code PENDING} row is even created - deliberately not
+	 * folded into a CAS the way {@link StreamRepository#claimChannel} is,
+	 * since this is a per-user cardinality rule, not a per-channel one.
+	 *
+	 * <p>Creates the {@code PENDING} row, then immediately attempts to
+	 * reserve a channel for it - two separate steps, two separate
+	 * transactions, not one atomic unit (a stream that fails to reserve a
+	 * channel still exists as a row, left {@code PENDING}, harmless to leave
+	 * behind - and deliberately not counted as "already live" above, or a
+	 * pool-exhaustion 503 would permanently lock a user out of ever trying
+	 * again).
 	 */
 	public GoLiveResponse goLive(User user, GoLiveRequest request) {
+		streamRepository.findFirstByUser_IdAndStatusInOrderByCreatedAtDesc(user.getId(), StreamStatus.CHANNEL_BOUND)
+				.ifPresent(existing -> {
+					throw new ResponseStatusException(HttpStatus.CONFLICT,
+							"You already have a stream in progress (id " + existing.getId()
+									+ ") - end it before starting another");
+				});
+
 		Stream stream = new Stream(user, request.title());
 		if (request.description() != null && !request.description().isBlank()) {
 			stream.setDescription(request.description());
@@ -56,9 +73,26 @@ public class LiveStreamingService {
 	 * real consequences for someone else's broadcast, so ownership is
 	 * checked explicitly rather than left to any implicit gate.
 	 *
-	 * <p>A no-op (not an error) when the stream isn't currently {@code LIVE}
-	 * - see {@link StreamStatusTransitions#markEndingRequested}'s own
-	 * javadoc for why.
+	 * <p>Tries {@code LIVE} first, then {@code STARTING} - both are real,
+	 * channel-holding states a stream can be sitting in when someone hits
+	 * "End stream", and both need the channel released. A no-op (not an
+	 * error) when the stream is in neither - see
+	 * {@link StreamStatusTransitions#markEndingRequested}'s own javadoc for
+	 * why.
+	 *
+	 * <p>Leaves the row at {@code ENDING} and waits for the async
+	 * {@code STOPPED}-state-change callback to mark it {@code ENDED} -
+	 * mirrors the {@code STARTING -> LIVE} confirmation path, and is the
+	 * design this originally intended. (A prior version of this method
+	 * marked {@code ENDED} synchronously right here instead, as a
+	 * workaround: the callback wasn't delivering at all, because
+	 * {@code terraform/lambda.tf}'s EventBridge rule was filtering on the
+	 * wrong {@code detail.state} value - confirmed live, and fixed there.
+	 * That workaround is gone now that the actual bug is fixed; keeping it
+	 * would have kept marking {@code ENDED} before {@link LiveChannelPool
+	 * #confirmStopped}'s MediaPackage reset could safely run, which is
+	 * exactly the content-leak bug {@code confirmStopped}'s own javadoc
+	 * describes.)
 	 */
 	public void endStream(User user, Long streamId) {
 		Stream stream = streamRepository.findById(streamId)
@@ -67,7 +101,9 @@ public class LiveStreamingService {
 			throw new AccessDeniedException("Stream " + streamId + " does not belong to " + user.getEmail());
 		}
 
-		if (statusTransitions.markEndingRequested(streamId)) {
+		boolean ending = statusTransitions.markEndingRequested(streamId, StreamStatus.LIVE)
+				|| statusTransitions.markEndingRequested(streamId, StreamStatus.STARTING);
+		if (ending) {
 			liveChannelPool.release(streamId);
 		}
 	}

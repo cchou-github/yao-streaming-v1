@@ -1,5 +1,6 @@
 package com.yaostreaming.api.live.rtmp;
 
+import com.yaostreaming.api.live.IngestMode;
 import com.yaostreaming.api.live.LiveChannelPool;
 import com.yaostreaming.api.live.Stream;
 import com.yaostreaming.api.live.StreamRepository;
@@ -54,6 +55,11 @@ public class MediaLiveChannelPool implements LiveChannelPool {
 		this.mediaLiveClient = mediaLiveClient;
 		this.mediaPackageV2Client = mediaPackageV2Client;
 		this.properties = properties;
+	}
+
+	@Override
+	public IngestMode supportedMode() {
+		return IngestMode.RTMP;
 	}
 
 	/**
@@ -166,7 +172,7 @@ public class MediaLiveChannelPool implements LiveChannelPool {
 					statusTransitions.markFailed(streamId);
 					throw e;
 				}
-				return Optional.of(new ReservedChannel(channelId, originSlug, ingestUrl));
+				return Optional.of(ReservedChannel.rtmp(channelId, originSlug, ingestUrl));
 			}
 		}
 

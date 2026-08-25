@@ -63,6 +63,20 @@ public interface StreamRepository extends JpaRepository<Stream, Long> {
 	int markEnded(@Param("id") Long id, @Param("endedAt") Instant endedAt);
 
 	/**
+	 * IVS-only: records the freshly-issued stream key's own ARN right after
+	 * a successful claim, so a later {@code confirmStopped} knows which key
+	 * to {@code DeleteStreamKey} - see {@code Stream.ingestSecretArn}'s own
+	 * javadoc for why. No status/{@code from} guard needed the way the other
+	 * {@code @Modifying} writes here have one: this always runs immediately
+	 * after {@link #claimChannel} won for the same {@code streamId}, within
+	 * the same short-lived reservation attempt, not reachable from any other
+	 * caller or state.
+	 */
+	@Modifying
+	@Query("update Stream s set s.ingestSecretArn = :ingestSecretArn where s.id = :id")
+	int recordIngestSecretArn(@Param("id") Long id, @Param("ingestSecretArn") String ingestSecretArn);
+
+	/**
 	 * Atomically claims {@code channelId} for {@code streamId}, moving the
 	 * stream {@code PENDING -> STARTING}, but only if no other stream
 	 * currently holds that channel (a stream in {@code STARTING}, {@code LIVE},

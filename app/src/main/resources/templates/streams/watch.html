@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/layout :: pageHead}"></th:block>
+    <title th:text="${stream.title} + ' — yao_streaming'">Watch</title>
+    <style>
+        .player {
+            background: #000;
+            border-radius: .5rem;
+            overflow: hidden;
+            margin-top: 1.25rem;
+            aspect-ratio: 16 / 9;
+        }
+        .player video { width: 100%; height: 100%; display: block; }
+        .notice {
+            background: var(--surface);
+            border: 1px dashed var(--rule);
+            border-radius: .5rem;
+            padding: 2.5rem 1.25rem;
+            text-align: center;
+            margin-top: 1.25rem;
+        }
+        .facts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .5rem 1.25rem;
+            align-items: center;
+            font-size: .88rem;
+            color: var(--ink-muted);
+            margin-top: .5rem;
+        }
+        .description { margin-top: 1.25rem; white-space: pre-wrap; }
+        .error {
+            color: var(--failed);
+            margin-top: .75rem;
+            font-size: .88rem;
+        }
+    </style>
+</head>
+<body>
+<th:block th:replace="~{fragments/layout :: nav}"></th:block>
+
+<main>
+    <h1 th:text="${stream.title}">Title</h1>
+    <div class="facts">
+        <span class="badge" th:classappend="${stream.status}" th:text="${stream.status}">LIVE</span>
+        <span th:text="${stream.streamerName}">Streamer</span>
+    </div>
+
+    <!-- Playable -->
+    <div th:if="${stream.playable}">
+        <div class="player">
+            <video id="player" controls playsinline preload="metadata"></video>
+        </div>
+        <p class="error" id="player-error" hidden></p>
+    </div>
+
+    <!-- Not yet (or no longer) playable -->
+    <div class="notice" th:unless="${stream.playable}">
+        <p class="muted" th:text="${stream.statusMessage}">Not live.</p>
+        <p th:if="${stream.status.name() == 'PENDING' or stream.status.name() == 'STARTING'}">
+            <a th:href="@{/streams/{id}(id=${stream.id})}">Refresh</a>
+        </p>
+    </div>
+
+    <p class="description" th:if="${stream.description}" th:text="${stream.description}">Description</p>
+</main>
+
+<th:block th:if="${stream.playable}">
+    <script th:src="@{/vendor/hls.min.js}"></script>
+    <script th:inline="javascript">
+        const source = /*[[${stream.playbackUrl}]]*/ '';
+        const video = document.getElementById('player');
+        const error = document.getElementById('player-error');
+
+        function fail(message) {
+            error.hidden = false;
+            error.textContent = message;
+        }
+
+        // Same player logic as videos/watch.html: Safari plays HLS
+        // natively, everyone else needs hls.js. A live manifest is no
+        // different from VOD's here - it's still just an HLS playlist, the
+        // player has no idea (or need to know) it's live vs. finished.
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = source;
+        }
+        else if (window.Hls && Hls.isSupported()) {
+            const hls = new Hls({ enableWorker: true, liveSyncDurationCount: 3 });
+            hls.loadSource(source);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    fail('Playback failed: ' + data.type + ' (' + data.details + ')');
+                }
+            });
+        }
+        else {
+            fail('This browser cannot play HLS.');
+        }
+    </script>
+</th:block>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/layout :: pageHead}"></th:block>
+    <title>Live</title>
+    <style>
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+            padding: 0;
+            list-style: none;
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--rule);
+            border-radius: .5rem;
+            padding: .95rem 1.05rem;
+            display: flex;
+            flex-direction: column;
+            gap: .4rem;
+        }
+        .card .title { font-weight: 620; }
+        .card a.title { color: var(--ink); text-decoration: none; }
+        .card a.title:hover { text-decoration: underline; }
+        .card .meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: .5rem;
+            font-size: .82rem;
+            color: var(--ink-muted);
+        }
+        .empty {
+            background: var(--surface);
+            border: 1px dashed var(--rule);
+            border-radius: .5rem;
+            padding: 2.5rem 1.25rem;
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+<th:block th:replace="~{fragments/layout :: nav}"></th:block>
+
+<main>
+    <h1>Live</h1>
+    <p class="muted">Streams currently broadcasting. Nothing here means nobody is live right now.</p>
+
+    <div class="empty" th:if="${#lists.isEmpty(streams)}">
+        <p class="muted">Nobody is live right now.</p>
+        <p><a th:href="@{/streams/golive}">Go live</a></p>
+    </div>
+
+    <ul class="grid" th:unless="${#lists.isEmpty(streams)}">
+        <li class="card" th:each="stream : ${streams}">
+            <a class="title" th:href="@{/streams/{id}(id=${stream.id})}" th:text="${stream.title}">Title</a>
+
+            <div class="meta">
+                <span th:text="${stream.streamerName}">Streamer</span>
+                <span class="badge LIVE">LIVE</span>
+            </div>
+        </li>
+    </ul>
+</main>
+</body>
+</html>

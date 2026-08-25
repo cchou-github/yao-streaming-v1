@@ -191,6 +191,21 @@ resource "aws_cloudfront_function" "ivs_manifest_rewrite" {
   # ever one real thing to fetch through this route (the master manifest
   # itself; see this section's own header comment for why nothing else
   # ever reaches CloudFront at all).
+  #
+  # Also injects an Origin header - found live, not anticipated: IVS's
+  # playback restriction policy (ivs.tf) requires an Origin header on every
+  # request its edge sees, but a real browser's own same-origin
+  # <video crossorigin="anonymous"> GET for this manifest, confirmed live via
+  # a real go-live/watch session, does not reliably send one - unlike the
+  # browser's own *direct*, genuinely cross-origin requests straight to
+  # IVS's domain for the variant playlist/segments afterward, which always
+  # carry Origin per the Fetch spec regardless of this attribute (only this
+  # one CloudFront-proxied hop needed help). Setting it unconditionally here
+  # doesn't grant anything on its own: CloudFront's trusted_key_groups check
+  # on this behavior still independently rejects any request whose signed
+  # cookie is missing/invalid before it ever reaches origin, function or no
+  # function - this only supplies the header IVS itself requires for a hop
+  # CloudFront has already gated by other means.
   code = <<-JS
     function handler(event) {
       var request = event.request;
@@ -204,6 +219,7 @@ resource "aws_cloudfront_function" "ivs_manifest_rewrite" {
         if (paths[slug]) {
           request.uri = paths[slug];
         }
+        request.headers['origin'] = { value: 'https://' + request.headers.host.value };
       }
       return request;
     }

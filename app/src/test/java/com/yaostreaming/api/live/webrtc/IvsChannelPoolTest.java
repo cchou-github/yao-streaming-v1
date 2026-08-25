@@ -32,8 +32,11 @@ import software.amazon.awssdk.services.ivs.model.ChannelNotBroadcastingException
 import software.amazon.awssdk.services.ivs.model.CreateStreamKeyRequest;
 import software.amazon.awssdk.services.ivs.model.CreateStreamKeyResponse;
 import software.amazon.awssdk.services.ivs.model.DeleteStreamKeyRequest;
+import software.amazon.awssdk.services.ivs.model.ListStreamKeysRequest;
+import software.amazon.awssdk.services.ivs.model.ListStreamKeysResponse;
 import software.amazon.awssdk.services.ivs.model.StopStreamRequest;
 import software.amazon.awssdk.services.ivs.model.StreamKey;
+import software.amazon.awssdk.services.ivs.model.StreamKeySummary;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -59,6 +62,12 @@ class IvsChannelPoolTest {
 	@BeforeEach
 	void setUp() {
 		pool = new IvsChannelPool(streamRepository, statusTransitions, ivsClient, TWO_SLOT_POOL);
+		// Default: no pre-existing stream key on the channel - most tests
+		// don't care about deleteExistingStreamKeys' own behavior, only that
+		// createStreamKey still gets called afterward. Overridden by the one
+		// test that actually exercises the "a key already exists" case.
+		when(ivsClient.listStreamKeys(any(ListStreamKeysRequest.class)))
+				.thenReturn(ListStreamKeysResponse.builder().streamKeys(List.of()).build());
 	}
 
 	private static CreateStreamKeyResponse createStreamKeyResponse(String arn, String value) {
@@ -97,6 +106,31 @@ class IvsChannelPoolTest {
 		ArgumentCaptor<CreateStreamKeyRequest> captor = ArgumentCaptor.forClass(CreateStreamKeyRequest.class);
 		verify(ivsClient).createStreamKey(captor.capture());
 		assertThat(captor.getValue().channelArn()).isEqualTo("channel-0");
+	}
+
+	/**
+	 * Found live, not anticipated: {@code aws_ivs_channel} comes back from
+	 * {@code terraform apply} with a default stream key IVS auto-provisions
+	 * on channel creation - one the app never requested or tracked. The very
+	 * first claim on any freshly-provisioned pool channel hit exactly this:
+	 * {@code CreateStreamKey} 402s with {@code ServiceQuotaExceededException}
+	 * since IVS enforces at most one key per channel.
+	 */
+	@Test
+	void reserveDeletesAPreExistingStreamKeyBeforeCreatingANewOne() {
+		when(statusTransitions.claimChannel(1L, "channel-0", "pool-0")).thenReturn(1);
+		when(ivsClient.listStreamKeys(any(ListStreamKeysRequest.class))).thenReturn(ListStreamKeysResponse.builder()
+				.streamKeys(StreamKeySummary.builder().arn("arn:aws:ivs:region:acct:stream-key/stale").build())
+				.build());
+		when(ivsClient.createStreamKey(any(CreateStreamKeyRequest.class)))
+				.thenReturn(createStreamKeyResponse("arn:aws:ivs:region:acct:stream-key/fresh", "sk_fresh"));
+
+		Optional<LiveChannelPool.ReservedChannel> reserved = pool.reserve(1L);
+
+		assertThat(reserved).isPresent();
+		verify(ivsClient).deleteStreamKey(
+				DeleteStreamKeyRequest.builder().arn("arn:aws:ivs:region:acct:stream-key/stale").build());
+		verify(ivsClient).createStreamKey(any(CreateStreamKeyRequest.class));
 	}
 
 	@Test

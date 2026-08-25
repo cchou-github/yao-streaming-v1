@@ -5,6 +5,10 @@ Known gaps and natural next steps, roughly grouped by area.
 ## Playback quality and latency
 
 - **Adaptive bitrate (multiple renditions).** Every pipeline currently produces a single rendition. Encoding several bitrate/resolution variants and letting the player switch between them based on viewer bandwidth is the standard next step for both VOD and live playback — see [Protocols, Codecs, and Transcoding](protocols-and-codecs.md#transcoding-why-source-video-doesnt-go-straight-to-viewers).
+- **A manual resolution/quality picker for viewers.** Once multiple renditions exist in a manifest, `hls.js` (already used in [videos/watch.html](../../app/src/main/resources/templates/videos/watch.html)) parses them into `hls.levels` and can pin one via `hls.currentLevel` — so a picker is mostly a player-UI addition (a dropdown wired to that setter), not new pipeline work.
+  - **WebRTC** may already have this available today: the IVS pool channels are provisioned as `STANDARD` (see `terraform/ivs.tf`), which auto-transcodes into a full ABR ladder with no pipeline config needed — worth confirming its `master.m3u8` already carries multiple renditions.
+  - **VOD and RTMP live** don't have multiple renditions yet at all — they need the "Adaptive bitrate" work above first.
+  - **Safari** plays HLS natively rather than through `hls.js`, and native HLS has no API for manual level selection — a picker there would mean switching Safari to `hls.js`'s MSE mode too, trading away native's efficiency for manual control.
 - **Lower live playback latency.** The player currently treats live manifests the same way it treats finished VOD files, deliberately buffering a few segments behind the live edge for stability. A player genuinely tuned for the underlying transport's low-latency mode — or a dedicated low-latency player build for the WebRTC path specifically — would bring end-to-end latency much closer to what the ingest protocol is actually capable of. See [Protocols, Codecs, and Transcoding](protocols-and-codecs.md#where-latency-comes-from).
 
 ## Access control
